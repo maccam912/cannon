@@ -9,9 +9,9 @@ const Aim := preload("res://game/sim/aim.gd")
 ## Recorded on Apple Silicon. CI replays them on x86 Linux and Windows, so a
 ## mismatch there means flights are no longer identical across devices.
 const GOLDEN := [
-	[12345, 450, 800, "t30d40t25", 0],
-	[777, 300, 1000, "d50t10d60t40", 0],
-	[2026, 620, 400, "", 0],
+	[12345, 450, 800, "t30d40t25", 20876],
+	[777, 300, 1000, "d50t10d60t40", 36600],
+	[2026, 620, 400, "", 8086],
 ]
 
 func label() -> String:

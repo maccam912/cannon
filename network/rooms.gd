@@ -24,7 +24,7 @@ func refresh_code() -> bool:
 	busy = true
 	var expected := _generation
 	var endpoint := str(Session.peer.call("endpoint_id"))
-	Session._set_status("Hosting · creating join code…")
+	Session._set_status("Getting a party code...")
 	var reply: Dictionary = await service.register(endpoint)
 	if expected != _generation:
 		if reply.ok:
@@ -47,7 +47,7 @@ func refresh_code() -> bool:
 	code = new_code
 	_revoke_token = token
 	expires_at = expiry
-	Session._set_status("Hosting · join code " + code)
+	Session._set_status("Hosting - code " + code)
 	changed.emit()
 	return true
 
@@ -58,7 +58,7 @@ func join(value: String) -> bool:
 	Session.leave()
 	busy = true
 	var expected := _generation
-	Session._set_status("Looking up join code…")
+	Session._set_status("Looking up the code...")
 	var reply: Dictionary = await service.resolve(value.to_upper())
 	if expected != _generation:
 		return false

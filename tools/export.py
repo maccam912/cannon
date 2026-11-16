@@ -11,13 +11,12 @@ from bootstrap import ROOT, templates
 from build_native import HOST, BIN, NAMES, build
 from godot import run
 
-PRESETS = {"linux": ("Linux", "starter.x86_64"), "windows": ("Windows", "starter.exe"),
-           "macos": ("macOS", "starter.zip"), "android": ("Android", "starter.apk"),
-           "server": ("Server", "starter-server.x86_64")}
+PRESETS = {"linux": ("Linux", "cannonauts.x86_64"), "windows": ("Windows", "cannonauts.exe"),
+           "macos": ("macOS", "cannonauts.zip"), "android": ("Android", "cannonauts.apk")}
 
 
 def export(platform, skip_build=False):
-    native_platform = "linux" if platform == "server" else platform
+    native_platform = platform
     if native_platform not in (HOST, "android"):
         raise RuntimeError("Export on the native platform; Android can also export on desktop")
     templates()
@@ -72,14 +71,14 @@ def export(platform, skip_build=False):
                                 capture_output=True, text=True, timeout=30)
         if result.returncode or "ERROR:" in result.stdout + result.stderr or "NATIVE_RUNTIME_PASS" not in result.stdout:
             raise RuntimeError(result.stdout + result.stderr)
-    if platform in ("linux", "windows", "server"):
+    if platform in ("linux", "windows"):
         output.chmod(output.stat().st_mode | 0o111)
         result = subprocess.run([str(output), "--headless", "--", "--native-smoke"], capture_output=True, text=True, timeout=30)
         if result.returncode or "ERROR:" in result.stdout + result.stderr or "NATIVE_RUNTIME_PASS" not in result.stdout:
             raise RuntimeError(result.stdout + result.stderr)
     release = ROOT / "build/artifacts"
     release.mkdir(parents=True, exist_ok=True)
-    artifact = release / ("godot-iroh-starter-" + platform + (".apk" if platform == "android" else ".zip"))
+    artifact = release / ("cannonauts-" + platform + (".apk" if platform == "android" else ".zip"))
     if platform in ("macos", "android"):
         shutil.copyfile(output, artifact)
     else:

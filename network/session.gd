@@ -91,7 +91,7 @@ func join(ticket: String) -> bool:
 	role = "joining"
 	local_id = 0
 	_started_at = Time.get_ticks_msec()
-	_set_status("Connecting…")
+	_set_status("Connecting...")
 	return true
 
 func ticket() -> String:

@@ -1,0 +1,138 @@
+name: Build and release
+
+# Every commit on main is tested, built for Android and desktop, and published
+# as a GitHub release numbered by this workflow's run number (0.1.N).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BUILD_NUMBER: ${{ github.run_number }}
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            os: ubuntu-24.04
+          - platform: linux
+            os: ubuntu-24.04
+          - platform: windows
+            os: windows-2022
+          - platform: macos
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/iroh/target
+          key: rust-${{ runner.os }}-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml', 'native/iroh/Cargo.lock') }}
+      - uses: actions/cache@v4
+        with:
+          path: .tools
+          key: godot-${{ runner.os }}-${{ matrix.platform }}-${{ hashFiles('tools/versions.json') }}
+      - name: Stamp build number
+        run: python tools/stamp.py ${{ env.BUILD_NUMBER }}
+      - name: Rust checks
+        if: matrix.platform == 'linux'
+        run: |
+          cargo fmt --manifest-path native/iroh/Cargo.toml --check
+          cargo clippy --locked --manifest-path native/iroh/Cargo.toml -- -D warnings
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        if: matrix.platform == 'android'
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install Android SDK and NDK
+        if: matrix.platform == 'android'
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.1' 'ndk;28.1.13356709'
+      - name: Build native host extension
+        run: python tools/build_native.py
+      - name: Test rules, protocol, and a host plus two clients
+        run: python tools/check.py
+      - name: Build Android extension
+        if: matrix.platform == 'android'
+        run: python tools/build_native.py android
+      - name: Export game
+        env:
+          # Optional: a stable signing key so each APK installs over the last.
+          ANDROID_KEYSTORE_BASE64: ${{ matrix.platform == 'android' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+        run: python tools/export.py ${{ matrix.platform }} --skip-build
+      - name: Upload game
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-${{ matrix.platform }}
+          path: build/artifacts/*
+          if-no-files-found: error
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.platform }}
+          path: build/smoke/*.log
+          if-no-files-found: ignore
+
+  release:
+    name: Publish build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: game-*
+          merge-multiple: true
+          path: release
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v0.1.${{ github.run_number }}
+          SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          {
+            echo "Build ${BUILD_NUMBER} from ${GITHUB_SHA::7}: $(printf '%s' "$SUBJECT" | head -n 1)"
+            echo
+            echo "- **Android**: install \`cannonauts-android.apk\` (ARM64, Android 10+)."
+            echo "- **Windows / Linux**: unzip and run. **macOS**: unzip, then right-click the app and choose Open."
+            echo
+            echo "Development builds: the APK is not store-signed and the desktop apps are not notarized."
+          } > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "Cannonauts build ${BUILD_NUMBER}" --notes-file notes.md --latest
+          fi

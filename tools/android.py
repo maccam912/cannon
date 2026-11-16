@@ -1,4 +1,5 @@
 """Package the small Java/JNI context bridge, using the pinned Godot classes."""
+import base64
 import io
 import json
 import os
@@ -44,10 +45,16 @@ def prepare():
         archive.writestr("R.txt", "")
     # All settings and signing material stay inside this project's ignored .tools.
     key = DATA / "debug.keystore"
+    # CI can supply one stable key (base64 in ANDROID_KEYSTORE_BASE64, alias
+    # androiddebugkey, password android) so each build installs over the last.
+    supplied = os.environ.get("ANDROID_KEYSTORE_BASE64", "").strip()
+    if supplied:
+        key.parent.mkdir(parents=True, exist_ok=True)
+        key.write_bytes(base64.b64decode(supplied))
     if not key.exists():
         subprocess.run([str(java / "bin" / ("keytool" + suffix)), "-genkeypair", "-keystore", str(key),
                         "-storepass", "android", "-keypass", "android", "-alias", "androiddebugkey",
-                        "-dname", "CN=Godot Iroh Development", "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000"], check=True)
+                        "-dname", "CN=Cannonauts Development", "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000"], check=True)
     # This editor is self-contained, so these preferences belong only to this
     # checkout. Configure them while it is stopped, before import/export.
     version = ".".join(VERSIONS["godot"].split(".")[:2])
