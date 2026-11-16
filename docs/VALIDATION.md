@@ -10,7 +10,7 @@ What has actually been exercised, and what has not. Checked on November 16,
 | Party rules (`tests/party_test.gd`) | Pass. Power presets apply to every replay. Full three-round match, host-only controls, 14 kinds of bad submission rejected, timeouts, leavers, late joiners, eight-seat cap |
 | Wire protocol (`tests/protocol.gd`) | Pass. Host ignores strangers, stale rounds and malformed data; clients accept only well-formed host messages |
 | Desktop multiplayer (`tests/smoke_peer.gd`) | Pass. One host and two client processes over real Iroh play a Boosted round with input logs long enough to need several packets; each client's own distance equals the host's replay |
-| Cross-CPU determinism | Golden distances recorded on ARM64 macOS; the Linux x86_64 CI job reproduced them. Windows x86_64 and macOS runners passed the same test in CI run 2 |
+| Cross-CPU determinism | Golden distances recorded on ARM64 macOS; the Linux x86_64 CI job reproduced them. Windows x86_64 and macOS runners reproduced them too, including the upgraded and wild-course flights (CI build 4) |
 | Desktop look | `tests/render.gd` screenshots at 1280x720 and 1170x540 inspected: menu, pump, angle, flight, landing, lobby, countdown, party flight with ghosts, round and final tables |
 | Android package | Release-mode APK, 36 MB, ARM64 library and Java bridge present, signature verified |
 | Android runtime | Installed on a Pixel 7 emulator (Android 15, 2400x1080). Landscape, safe-area inset applied, touch pump/fire/thrust/dive, best score persisted across an APK update |

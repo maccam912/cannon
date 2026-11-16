@@ -7,14 +7,25 @@ from bootstrap import ROOT, engine
 
 def run(arguments, timeout=None):
     # Let deferred extension registration finish before the editor shuts down.
-    if "--import" in arguments:
+    importing = "--import" in arguments
+    if importing:
         arguments = [arg for arg in arguments if arg not in ("--import", "--quit")]
         arguments += ["--quit-after", "180", "--max-fps", "60"]
-    result = subprocess.run([str(engine()), "--path", str(ROOT), *arguments],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout)
-    print(result.stdout, end="", flush=True)
-    if result.returncode or any(marker in result.stdout for marker in ("SCRIPT ERROR:", "ERROR:", "Parse Error:", "TEST FAIL")):
-        raise RuntimeError("Godot failed; see output above")
+    markers = ("SCRIPT ERROR:", "ERROR:", "Parse Error:", "TEST FAIL")
+    for attempt in (1, 2):
+        result = subprocess.run([str(engine()), "--path", str(ROOT), *arguments],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout)
+        print(result.stdout, end="", flush=True)
+        reported = any(marker in result.stdout for marker in markers)
+        # The headless editor occasionally dies on exit after a clean import,
+        # with no message at all (seen on a Windows runner). That one case is
+        # retried once; anything that reports an error fails immediately.
+        if importing and attempt == 1 and result.returncode and not reported:
+            print("Godot exited with code %d during import without reporting an error; retrying once." % result.returncode, flush=True)
+            continue
+        break
+    if result.returncode or reported:
+        raise RuntimeError("Godot failed (exit code %d); see output above" % result.returncode)
     return result.stdout
 
 

@@ -116,6 +116,11 @@ and on manual dispatch:
 A release appears only if all four platform jobs pass. Re-running a workflow
 keeps its number and replaces that release's files.
 
+Godot's headless editor has once exited with an error code after a clean
+import on the Windows runner, printing nothing. `tools/godot.py` retries the
+import once in exactly that case and says so in the log; an import that reports
+an error still fails straight away.
+
 `relay-smoke.yml` is a manual workflow that forces relay-only connections, kept
 separate so a public relay outage does not look like a broken commit.
 
