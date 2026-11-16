@@ -3,6 +3,7 @@ extends "res://tests/harness.gd"
 
 const Party := preload("res://game/sim/party.gd")
 const Flight := preload("res://game/sim/flight.gd")
+const Upgrades := preload("res://game/sim/upgrades.gd")
 
 func label() -> String:
 	return "PARTY"
@@ -12,6 +13,7 @@ func run() -> void:
 	_rejections()
 	_timeouts_and_leavers()
 	_lobby_rules()
+	_power()
 
 func _ticks(party: Party, count: int) -> void:
 	for _i in count:
@@ -69,7 +71,7 @@ func _rejections() -> void:
 	var bad := [
 		[2, 1, 450, 5000, ""], [2, 1, 900, 500, ""], [2, 1, 100, 500, ""], [2, 1, 450, -1, ""],
 		[2, 2, 450, 500, ""], [2, 1, 450.5, 500, ""], [2, 1, "450", 500, ""], [2, 1, 450, 500, 12],
-		[2, 1, 450, 500, "zzz"], [2, 1, 450, 500, "t1".repeat(400)], [2, 1, NAN, 500, ""], [2, 1, 450, INF, ""],
+		[2, 1, 450, 500, "zzz"], [2, 1, 450, 500, "t1".repeat(4000)], [2, 1, NAN, 500, ""], [2, 1, 450, INF, ""],
 		[9, 1, 450, 500, ""], [2, null, 450, 500, ""],
 	]
 	for row: Array in bad:
@@ -129,3 +131,23 @@ func _lobby_rules() -> void:
 	var before := party.roster_revision
 	party.remove_player(1234)
 	check(party.roster_revision == before, "removing a stranger changes nothing")
+
+## The host's power level applies to everyone and is what the replay uses.
+func _power() -> void:
+	var party := Party.new(21)
+	party.add_player(1, "Host")
+	party.add_player(2, "Ada")
+	check(not party.set_power(2, 2) and not party.set_power(1, 3) and not party.set_power(1, -1), "only the host picks a real power level")
+	check(party.set_power(1, 2) and party.power == 2, "host picks MAXED")
+	party.set_rounds(1, 1)
+	party.start(1)
+	check(not party.set_power(1, 0), "power is locked once the match starts")
+	_until(party, Party.Phase.PLAYING)
+	# A long log, as an upgraded flight can produce.
+	var plan := "t20" + "d45".repeat(300)
+	check(party.submit(1, 1, 450, 900, plan) and party.submit(2, 1, 450, 900, ""), "long input logs are accepted")
+	check(_until(party, Party.Phase.RESULTS, 30000), "maxed flights still resolve")
+	var maxed: Flight = Flight.replay(party.round_seed, 450, 900, Flight.decode_inputs(plan), Upgrades.preset(2))
+	var stock: Flight = Flight.replay(party.round_seed, 450, 900, Flight.decode_inputs(plan))
+	check(party.players[1].round_cm == maxed.distance_cm(), "the replay used the party's power level")
+	check(maxed.distance_cm() > stock.distance_cm(), "and MAXED really is stronger than STOCK")

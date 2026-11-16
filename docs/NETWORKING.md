@@ -12,6 +12,9 @@ the multiplayer model simple and cheap:
 - **Replay to score.** When a flight ends, the client sends what it did: launch
   angle, pressure, and the ticks at which it thrust or dived. The host replays
   that through the same simulation and records its own answer.
+- **One power level.** Solo upgrades stay out of it. The host picks a preset
+  (Stock, Boosted or Maxed) that every flight and every replay uses, so the
+  host never has to trust a client's claimed upgrade levels.
 - **Ghosts are cosmetic.** Positions are relayed ten times a second so you can
   watch the others. They never affect a score.
 
@@ -52,39 +55,47 @@ processes compare the host's verified distance with their own.
 ## Wire protocol
 
 The application ALPN is `cannonauts/1` (`native/iroh/src/lib.rs`) and the code
-namespace is `cannonauts/1` (`project.godot`). Messages are UTF-8 JSON, at most
-1024 bytes, parsed as plain data.
+namespace is `cannonauts/1` (`project.godot`). The message protocol is version 2;
+a client on another version is turned away at `hello`. Messages are UTF-8 JSON,
+at most 1024 bytes, parsed as plain data.
 
 | Channel | Delivery | Client to host | Host to clients |
 | --- | --- | --- | --- |
-| 0 | Reliable, ordered | `hello`, `result` | `welcome`, `phase`, `roster` |
+| 0 | Reliable, ordered | `hello`, `inputs`, `result` | `welcome`, `phase`, `roster` |
 | 1 | Unreliable, ordered | `pos` | `ghosts` |
 
 | Message | Fields |
 | --- | --- |
 | `hello` | `version`, `name` |
 | `welcome` | `version` |
-| `phase` | `ph` phase, `r` round, `n` rounds, `seed`, `t` ticks left |
+| `phase` | `ph` phase, `r` round, `n` rounds, `u` power level, `seed`, `t` ticks left |
 | `roster` | `p`: rows of `[id, name, slot, total_cm, round_cm, best_cm, playing]` |
-| `result` | `r` round, `a` angle in tenths of a degree, `p` pressure per mille, `i` input log |
+| `inputs` | `r` round, `k` piece index, `i` up to 800 characters of input log |
+| `result` | `r` round, `a` angle in tenths of a degree, `p` pressure per mille, `n` number of input pieces sent |
 | `pos` | `r`, `x`, `y`, `s` state (0 aiming, 1 flying, 2 landed) |
 | `ghosts` | `r`, `g`: rows of `[id, x, y, state]` |
 
 The input log is a string of `<letter><ticks since the previous input>` with
 `t` for thrust and `d` for dive, so `t12d40` means thrust at tick 12 and dive at
-tick 52. It is capped at 200 inputs and 900 characters.
+tick 52. It is capped at 1500 inputs and 7200 characters. A long upgraded flight
+does not fit one packet, so the log travels as ordered `inputs` pieces (at most
+nine) and the `result` that follows says how many there were.
 
 Phases: `LOBBY`, `COUNTDOWN` (3 s), `PLAYING`, `RESULTS`, `FINAL`. Clients must
 fire within 15 seconds of the round starting or the cannon fires for them. A
-round is hard-capped, and anyone who has not reported by then scores zero.
+flight is capped at five minutes and a round a little beyond that; anyone who
+has not reported by then scores zero.
 
 ## What the host checks
 
 - `hello` only from a peer that just connected, with the right version, while
   there is a seat. Unintroduced peers are dropped after five seconds.
+- `inputs` pieces only for the current round, in order, each at most 800
+  characters and at most nine of them; anything else discards what was received.
 - `result` only during `PLAYING`, for the current round, from a seated player
   who still owes one, with whole-number angle and pressure inside their legal
-  ranges and a well-formed input log. One result per player per round.
+  ranges, a piece count that matches, and a well-formed input log. One result
+  per player per round.
 - The distance is never read from the client. Inputs that could not have taken
   effect (a fourth thrust, a dive on the ground) simply do nothing in the replay.
 - `pos` values are bounded and never scored.

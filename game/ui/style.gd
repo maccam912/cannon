@@ -12,6 +12,7 @@ const BLUE := Color(0.2, 0.55, 0.98)
 const GREEN := Color(0.25, 0.78, 0.42)
 const RED := Color(0.93, 0.33, 0.33)
 const SLATE := Color(0.27, 0.33, 0.47)
+const PURPLE := Color(0.55, 0.42, 0.9)
 
 ## One look per seat: five round cannonauts, then three square ones.
 const ALIENS := ["alien_green", "alien_blue", "alien_pink", "alien_yellow", "alien_beige",

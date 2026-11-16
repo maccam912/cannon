@@ -5,6 +5,7 @@ extends SceneTree
 
 const Aim := preload("res://game/sim/aim.gd")
 const Party := preload("res://game/sim/party.gd")
+const Upgrades := preload("res://game/sim/upgrades.gd")
 
 var main: Node
 var folder := "res://build/shots/"
@@ -19,6 +20,40 @@ func _run() -> void:
 	root.add_child(main)
 	await _wait(3.5)
 	await _shot(prefix + "1_menu")
+
+	# The shop, with enough stars to afford something, then a maxed cannon on a
+	# wild course. The real profile is put back afterwards.
+	var save: Node = root.get_node("Save")
+	var kept := [save.stars, save.earned, save.levels.duplicate(), save.best_cm, save.launches]
+	save.stars = 260
+	save.levels = Upgrades.clean({"powder": 3, "rubber": 2, "springs": 1, "thrusters": 5})
+	main._show_shop()
+	await _wait(0.4)
+	await _shot(prefix + "1b_shop")
+	main._start_solo()
+	main._begin_round(7, 0, Upgrades.preset(2))
+	main._start_aim(0)
+	await _wait(0.5)
+	await _shot(prefix + "1c_wild_course")
+	main.aim.force()
+	main._fire()
+	for index in 3:
+		await _wait(2.5)
+		main._on_primary()
+		await _wait(0.2)
+		await _shot(prefix + "1d_maxed_flight_%d" % index)
+	var cap := 0
+	while main.stage == main.Stage.FLYING and cap < 18000:
+		cap += 1
+		await physics_frame
+	await _wait(0.6)
+	await _shot(prefix + "1e_maxed_landed")
+	save.stars = kept[0]
+	save.earned = kept[1]
+	save.levels = kept[2]
+	save.best_cm = kept[3]
+	save.launches = kept[4]
+	save.store()
 
 	main._start_solo()
 	await _wait(0.4)
@@ -61,6 +96,9 @@ func _run() -> void:
 		await _wait(0.5)
 		await _shot(prefix + "7_lobby")
 		session.set_rounds(1)
+		session.set_power(1)
+		await _wait(0.3)
+		await _shot(prefix + "7b_lobby_power")
 		session.start_match()
 		await _wait(1.2)
 		await _shot(prefix + "8_countdown")

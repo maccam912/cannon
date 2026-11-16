@@ -54,15 +54,51 @@ any bounce, so use it to pick your landing spot.
 | Cactus | Halves your speed. |
 | Storm cloud | Swats you toward the ground. |
 
+## Stars and upgrades
+
+Every launch pays stars: one per 10 m flown, three per coin, and ten for
+perfect pressure. Party rounds pay too. Spend them in **Upgrades** on permanent
+boosts to your solo cannon; each level costs about half as much again as the
+last.
+
+| Upgrade | Levels | What it does |
+| --- | --- | --- |
+| Gunpowder | 10 | +8% launch speed per level |
+| Rubber Suit | 10 | Keep more bounce and speed on every landing |
+| Super Springs | 10 | Springs fling you higher and faster |
+| Spring Farm | 10 | More springs on the course, some replacing hazards |
+| Thrusters | 5 | One more thrust charge per level |
+| Slipstream | 10 | Less air drag |
+| Lucky Charm | 10 | Wild courses turn up more often (6% up to 26%) |
+
+**Wild courses** are why a run sometimes goes absurdly far. The game announces
+one before you pump:
+
+| Wild course | Twist |
+| --- | --- |
+| Spring Fever | Springs nearly everywhere, and each one pushes you forward harder |
+| Boom Town | Barrels where the hazards were, with more than double the kick |
+| Tailwind | Almost no drag and a strong push that fades over 45 seconds |
+| Moon Day | Low gravity and a hotter launch |
+
+A stock cannon typically flies around 250 m. Half-upgraded it is nearer 700 m,
+fully upgraded around 1.7 km, and a wild course on top of that can run to
+several kilometres (bots have reached 18 km). Springs and barrels give a little
+less each time you use them in one flight, so even those runs come down.
+
 ## Party mode
 
 One player taps **Host a party** and shares the four-character code. Everyone
-else taps **Join a party** and types it in. The host picks 1, 3 or 5 rounds and
-starts. Each round:
+else taps **Join a party** and types it in. The host picks 1, 3 or 5 rounds and a
+power level, then starts. Each round:
 
 - everyone gets the same course and launches after the same countdown,
 - you see the others flying as ghosts, with a live leaderboard,
 - the round ends when the last cannonaut stops, and distances add up.
+
+Personal upgrades do not apply in a party. The host picks one **power** level
+for everyone (Stock, Boosted or Maxed), so it is always a fair fight, and a
+wild course is wild for the whole room.
 
 Highest total after the last round wins. Joining mid-round is fine: you watch
 that round and play from the next one. If the host leaves, the party ends.
@@ -85,7 +121,7 @@ python3 tools/check.py          # rules + protocol tests, then a real 3-process 
 
 | Path | What lives there |
 | --- | --- |
-| `game/sim/` | The whole game as plain, deterministic code: course, flight, launch ritual, party rules. No nodes, no network. |
+| `game/sim/` | The whole game as plain, deterministic code: course, flight, launch ritual, upgrades, party rules. No nodes, no network. |
 | `game/` | Presentation: world, HUD, menu, lobby, and `main.gd` which runs the flow |
 | `network/` | Iroh session and wire protocol, party codes |
 | `native/iroh/` | Rust transport (from the template; no game rules) |

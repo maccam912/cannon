@@ -10,6 +10,11 @@ const SLOT := CHUNK / SLOTS
 const CLEAR_START := 40.0
 
 enum Kind { SPRING, MUD, BARREL, CACTUS, RING, WINGMAN, FUEL, STORM, COIN }
+## Rare whole-course twists. They are why a run sometimes goes absurdly far.
+enum Event { NONE, SPRING_FEVER, BOOM_TOWN, TAILWIND, MOON_DAY }
+
+const EVENT_NAMES := ["", "SPRING FEVER!", "BOOM TOWN!", "TAILWIND!", "MOON DAY!"]
+const EVENT_BLURBS := ["", "Springs everywhere", "Barrels where the hazards were", "The wind is at your back", "Low gravity"]
 
 const NAMES := ["spring", "mud", "barrel", "cactus", "ring", "wingman", "fuel", "storm", "coin"]
 
@@ -20,8 +25,21 @@ var _chunks: Dictionary = {}
 var _near_index := -1000000
 var _near_items: Array = []
 
-func _init(course_seed: int = 1) -> void:
+## Spring Farm level 0..10: extra springs, some replacing hazards.
+var farm := 0
+var event: int = Event.NONE
+
+func _init(course_seed: int = 1, farm_level: int = 0, course_event: int = Event.NONE) -> void:
 	seed_value = course_seed
+	farm = clampi(farm_level, 0, 10)
+	event = course_event
+
+## Which twist a seed gets. Luck 0..10 raises the odds from 6% to 26%.
+static func event_for(course_seed: int, luck: int) -> int:
+	var rng := Rng.new(Rng.mix(course_seed, 0xE7E47))
+	if rng.unit() >= 0.06 + 0.02 * clampi(luck, 0, 10):
+		return Event.NONE
+	return 1 + rng.next_u32() % (Event.size() - 1)
 
 ## Items are {id, kind, x, y, r, w}: y/r describe a circle (centre height and
 ## radius) for touch items, w is the half width of ground pads.
@@ -34,6 +52,9 @@ func chunk(index: int) -> Array:
 
 func _generate(index: int) -> Array:
 	var rng := Rng.new(Rng.mix(seed_value, index))
+	# Upgrades and events draw from their own stream, so they only ever add
+	# to or convert the base layout and never reshuffle it.
+	var extra := Rng.new(Rng.mix(seed_value ^ 0x5EED5, index))
 	var items: Array = []
 	var base := index * CHUNK
 	# Hazards slowly crowd out help the further you get.
@@ -42,11 +63,28 @@ func _generate(index: int) -> Array:
 	var air := [20, 24, 8, 14 + int(8 * far), 28]
 	for slot in SLOTS:
 		var left := base + slot * SLOT
+		var swap := extra.unit()
+		var bonus := extra.unit()
+		var bonus_x := left + extra.range_f(3.0, SLOT - 3.0)
 		if rng.unit() < 0.7:
 			var x := left + rng.range_f(3.0, SLOT - 3.0)
 			var kind: int = [Kind.SPRING, Kind.MUD, Kind.BARREL, Kind.CACTUS][rng.pick(ground)]
+			if kind == Kind.MUD or kind == Kind.CACTUS:
+				if event == Event.SPRING_FEVER and swap < 0.8:
+					kind = Kind.SPRING
+				elif event == Event.BOOM_TOWN and swap < 0.75:
+					kind = Kind.BARREL
+				elif swap < farm * 0.05:
+					kind = Kind.SPRING
 			if x >= CLEAR_START:
 				items.append(_ground_item(index, items.size(), kind, x))
+		elif bonus_x >= CLEAR_START:
+			if event == Event.SPRING_FEVER and bonus < 0.8:
+				items.append(_ground_item(index, items.size(), Kind.SPRING, bonus_x))
+			elif event == Event.BOOM_TOWN and bonus < 0.5:
+				items.append(_ground_item(index, items.size(), Kind.BARREL, bonus_x))
+			elif bonus < farm * 0.05:
+				items.append(_ground_item(index, items.size(), Kind.SPRING, bonus_x))
 		if rng.unit() < 0.62:
 			var x := left + rng.range_f(2.0, SLOT - 2.0)
 			var kind: int = [Kind.RING, Kind.WINGMAN, Kind.FUEL, Kind.STORM, Kind.COIN][rng.pick(air)]

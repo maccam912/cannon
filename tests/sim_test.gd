@@ -5,13 +5,22 @@ const Rng := preload("res://game/sim/rng.gd")
 const Course := preload("res://game/sim/course.gd")
 const Flight := preload("res://game/sim/flight.gd")
 const Aim := preload("res://game/sim/aim.gd")
+const Upgrades := preload("res://game/sim/upgrades.gd")
 
 ## Recorded on Apple Silicon. CI replays them on x86 Linux and Windows, so a
 ## mismatch there means flights are no longer identical across devices.
+const MAXED := {"powder": 10, "rubber": 10, "springs": 10, "farm": 10, "thrusters": 5, "slipstream": 10, "luck": 10}
 const GOLDEN := [
-	[12345, 450, 800, "t30d40t25", 20876],
-	[777, 300, 1000, "d50t10d60t40", 36600],
-	[2026, 620, 400, "", 8086],
+	[12345, 450, 800, "t30d40t25", 20876, {}],
+	[777, 300, 1000, "d50t10d60t40", 36600, {}],
+	[2026, 620, 400, "", 8086, {}],
+	[4242, 400, 900, "t20d45t30d60", 85741, {"powder": 5, "rubber": 5, "springs": 5, "farm": 5, "thrusters": 2, "slipstream": 5, "luck": 5}],
+	[31337, 350, 1000, "d40t90", 90464, MAXED],
+	# One of each wild course: boom town, spring fever, tailwind, moon day.
+	[1, 400, 900, "t60", 655155, MAXED],
+	[3, 400, 900, "t60", 783623, MAXED],
+	[7, 400, 900, "t60", 443552, MAXED],
+	[13, 400, 900, "t60", 360239, MAXED],
 ]
 
 func label() -> String:
@@ -23,6 +32,7 @@ func run() -> void:
 	_physics()
 	_inputs()
 	_aim()
+	_progression()
 	_golden()
 	_survey()
 
@@ -85,7 +95,7 @@ func _physics() -> void:
 	for index in 400:
 		if thrusty.step(Flight.IN_THRUST) & Flight.IN_THRUST:
 			used += 1
-	check(used == Flight.START_THRUSTS and thrusty.thrusts == 0, "only three thrusts")
+	check(used == Flight.START_THRUSTS and thrusty.thrusts == 0, "only three thrusts when stock")
 	check(_finish(thrusty).x > _finish(_bare(450, 500)).x + 20.0, "thrusts add distance")
 
 	# Dive: lands sooner, hits no harder, so it cannot be farmed for energy.
@@ -151,7 +161,7 @@ func _inputs() -> void:
 	check(text == "t5d35t1d859", "compact input encoding")
 	check(str(Flight.decode_inputs(text)) == str(log), "inputs survive a round trip")
 	check(Flight.decode_inputs("") == [], "empty log is fine")
-	for bad in ["x5", "t", "t-5", "5t", "t999999", "t5 d5", "d%d" % Flight.MAX_TICKS, "t1".repeat(Flight.MAX_INPUTS + 1), "t1".repeat(600)]:
+	for bad in ["x5", "t", "t-5", "5t", "t999999", "t5 d5", "d%d" % Flight.MAX_TICKS, "t1".repeat(Flight.MAX_INPUTS + 1), "t1".repeat(4000)]:
 		check(Flight.decode_inputs(bad) == null, "rejects malformed input log " + bad.left(12))
 
 	# Stepping live and replaying the recorded log must agree exactly.
@@ -194,45 +204,139 @@ func _aim() -> void:
 	check(lazy.stage == Aim.Stage.FIRED and lazy.power_permille < 100, "running out of time fires a weak shot")
 	check(lazy.angle_decideg >= Flight.MIN_ANGLE and lazy.angle_decideg <= Flight.MAX_ANGLE, "forced angle is legal")
 
+func _upgraded(id: String, level: int, angle: int = 450, power: int = 800) -> Flight:
+	var flight := Flight.new(1, {id: level})
+	flight.course.enabled = false
+	flight.launch(angle, power)
+	return flight
+
+func _progression() -> void:
+	# Costs climb, presets are sane, junk input is cleaned.
+	for id: String in Upgrades.IDS:
+		check(Upgrades.cost(id, 0) == Upgrades.INFO[id].cost, "%s starts at its base cost" % id)
+		for level in range(1, Upgrades.max_level(id)):
+			check(Upgrades.cost(id, level) > Upgrades.cost(id, level - 1), "%s gets pricier" % id)
+		check(not Upgrades.effect(id, 1).is_empty(), "%s describes itself" % id)
+	check(Upgrades.cost("powder", 9) > 500 and Upgrades.cost("powder", 9) < 2000, "top levels cost hundreds, not millions")
+	check(Upgrades.preset(0).powder == 0 and Upgrades.preset(1).powder == 5 and Upgrades.preset(2).thrusters == 5, "party presets")
+	var junk := Upgrades.clean({"powder": 99, "rubber": -4, "luck": "lots", "farm": NAN, "bogus": 3})
+	check(junk.powder == 10 and junk.rubber == 0 and junk.luck == 0 and junk.farm == 0 and not junk.has("bogus"), "levels are clamped and unknown ones dropped")
+	check(Upgrades.clean(null).size() == Upgrades.IDS.size(), "nothing means stock")
+	check(Upgrades.stars(25000, 0, false) == 25 and Upgrades.stars(25000, 4, true) == 47, "stars: distance, coins, perfect tip")
+
+	# Each purchase does what its card says.
+	var stock := _finish(_bare(450, 800))
+	check(_finish(_upgraded("powder", 10)).x > stock.x * 1.8, "gunpowder launches much further")
+	check(_finish(_upgraded("rubber", 10)).x > stock.x * 1.2, "rubber suit keeps bouncing")
+	check(_finish(_upgraded("slipstream", 10)).x > stock.x * 1.03, "slipstream loses less speed")
+	check(_upgraded("thrusters", 5).thrusts == 8 and _upgraded("thrusters", 5).max_thrusts == 10, "thrusters add charges")
+	var spring := Flight.new(1, {"springs": 10})
+	spring.course._chunks = {0: [{"id": 1, "kind": Course.Kind.SPRING, "x": 6.0, "y": 0.0, "r": 0.0, "w": 1.6}], -1: [], 1: []}
+	spring.vx = 20.0
+	spring.y = 0.0
+	spring.rolling = true
+	for _i in 40:
+		spring.step()
+		if spring.consumed.has(1):
+			break
+	check(spring.vy > _effect(Course.Kind.SPRING, 0.0, 0.0).vy * 1.6, "super springs fling harder")
+
+	# Spring Farm only ever adds springs or swaps hazards for them.
+	var plain := Course.new(77)
+	var farmed := Course.new(77, 10)
+	var before := _tally(plain)
+	var after := _tally(farmed)
+	check(after[Course.Kind.SPRING] > before[Course.Kind.SPRING] * 1.5, "farm grows springs (%d -> %d)" % [before[Course.Kind.SPRING], after[Course.Kind.SPRING]])
+	check(after[Course.Kind.MUD] < before[Course.Kind.MUD] and after[Course.Kind.CACTUS] < before[Course.Kind.CACTUS], "farm replaces some hazards")
+	check(after[Course.Kind.RING] == before[Course.Kind.RING] and after[Course.Kind.COIN] == before[Course.Kind.COIN], "farm leaves the sky alone")
+	check(str(Course.new(77, 10).chunk(9)) == str(farmed.chunk(9)), "farmed courses are reproducible")
+
+	# Wild courses: rarer without luck, same answer every time, real effects.
+	var rare := 0
+	var lucky := 0
+	for trial in 2000:
+		if Course.event_for(trial, 0) != Course.Event.NONE:
+			rare += 1
+		if Course.event_for(trial, 10) != Course.Event.NONE:
+			lucky += 1
+			check(Course.event_for(trial, 10) < Course.Event.size(), "event in range")
+	check(rare > 60 and rare < 200, "about 6%% of stock courses are wild (%d of 2000)" % rare)
+	check(lucky > 400 and lucky < 650, "about 26%% with full luck (%d of 2000)" % lucky)
+	check(Course.event_for(123, 4) == Course.event_for(123, 4), "a seed's event never changes")
+	var fever := _tally(Course.new(77, 0, Course.Event.SPRING_FEVER))
+	check(fever[Course.Kind.SPRING] > before[Course.Kind.SPRING] * 2, "spring fever is mostly springs")
+	var boom := _tally(Course.new(77, 0, Course.Event.BOOM_TOWN))
+	check(boom[Course.Kind.BARREL] > before[Course.Kind.BARREL] * 2, "boom town is mostly barrels")
+	var moon := Flight.new(1)
+	moon.course.enabled = false
+	moon._gravity = Flight.GRAVITY * 0.6
+	moon.launch(450, 800)
+	check(_finish(moon).x > stock.x * 1.4, "low gravity carries further")
+
+func _tally(course: Course) -> Array:
+	var counts: Array = []
+	counts.resize(Course.Kind.size())
+	counts.fill(0)
+	for index in 80:
+		for item: Dictionary in course.chunk(index):
+			counts[item.kind] += 1
+	return counts
+
 func _golden() -> void:
 	var report := "GOLDEN"
 	for row: Array in GOLDEN:
-		var flight: Flight = Flight.replay(row[0], row[1], row[2], Flight.decode_inputs(row[3]))
+		var flight: Flight = Flight.replay(row[0], row[1], row[2], Flight.decode_inputs(row[3]), row[5])
 		report += " %d" % flight.distance_cm()
 		check(flight.distance_cm() == row[4], "golden flight seed %d: got %d cm, expected %d" % [row[0], flight.distance_cm(), row[4]])
 	print(report)
+	for index in 4:
+		check(Course.event_for(GOLDEN[5 + index][0], 10) == [2, 1, 3, 4][index], "golden seed %d is the wild course it claims" % GOLDEN[5 + index][0])
+
+## A crude player: thrust when about to land slowly, dive onto springs.
+func _bot_flight(course_seed: int, angle: int, power: int, levels: Dictionary) -> Flight:
+	var flight := Flight.new(course_seed, levels)
+	flight.launch(angle, power)
+	while not flight.done:
+		var want := 0
+		if flight.y < 1.0 and flight.vy < 0.0 and flight.vx < 18.0:
+			want = Flight.IN_THRUST
+		elif flight.y > 2.0:
+			for item: Dictionary in flight.course.near(flight.x):
+				if item.kind == Course.Kind.SPRING and item.x > flight.x and item.x - flight.x < flight.vx * 0.35:
+					want = Flight.IN_DIVE
+		flight.step(want)
+		flight.events.clear()
+	return flight
 
 ## Tuning aid and safety net: lots of bot flights must end, and the spread of
-## distances shows whether skill matters.
+## distances shows whether upgrades and luck deliver the occasional huge run.
 func _survey() -> void:
 	var rng := Rng.new(99)
-	var idle: Array = []
-	var busy: Array = []
-	var longest := 0
-	for trial in 120:
-		var angle := 300 + rng.next_u32() % 300
-		var power := 500 + rng.next_u32() % 501
-		var quiet: Flight = Flight.replay(5000 + trial, angle, power, [])
-		idle.append(quiet.distance_cm() / 100)
-		var flight := Flight.new(5000 + trial)
-		flight.launch(angle, power)
-		while not flight.done:
-			# A crude bot: thrust when about to land slowly, dive at springs.
-			var want := 0
-			if flight.y < 1.0 and flight.vy < 0.0 and flight.vx < 18.0:
-				want = Flight.IN_THRUST
-			elif flight.y > 2.0:
-				for item: Dictionary in flight.course.near(flight.x):
-					if item.kind == Course.Kind.SPRING and item.x > flight.x and item.x - flight.x < flight.vx * 0.35:
-						want = Flight.IN_DIVE
-			flight.step(want)
-			flight.events.clear()
-		busy.append(flight.distance_cm() / 100)
-		longest = maxi(longest, flight.tick)
-		check(flight.tick <= Flight.MAX_TICKS, "flight ends in time")
-	idle.sort()
-	busy.sort()
-	print("SURVEY idle median %d m (p90 %d, max %d) · bot median %d m (p90 %d, max %d) · longest %d s" % [
-			idle[idle.size() / 2], idle[idle.size() * 9 / 10], idle[-1], busy[busy.size() / 2], busy[busy.size() * 9 / 10], busy[-1], longest / 60])
-	check(idle[idle.size() / 2] > 80, "idle flights are not pathetic")
-	check(busy[busy.size() / 2] > idle[idle.size() / 2], "playing well beats doing nothing")
+	var shots: Array = []
+	for trial in 150:
+		shots.append([5000 + trial, 300 + rng.next_u32() % 300, 500 + rng.next_u32() % 501])
+	var medians: Array = []
+	for preset in 3:
+		var levels := Upgrades.preset(preset)
+		var distances: Array = []
+		var times: Array = []
+		var longest := 0
+		var wild := 0
+		for shot: Array in shots:
+			var flight := _bot_flight(shot[0], shot[1], shot[2], levels)
+			distances.append(flight.distance_cm() / 100)
+			longest = maxi(longest, flight.tick)
+			times.append(flight.tick / 60)
+			if flight.event != Course.Event.NONE:
+				wild += 1
+			check(flight.tick <= Flight.MAX_TICKS, "flight ends in time")
+		distances.sort()
+		times.sort()
+		medians.append(distances[distances.size() / 2])
+		print("SURVEY %s: median %d m, p90 %d m, max %d m, %d wild, time median %d s / p90 %d s / max %d s, median stars %d" % [
+				Upgrades.PRESET_NAMES[preset], distances[distances.size() / 2], distances[distances.size() * 9 / 10],
+				distances[-1], wild, times[times.size() / 2], times[times.size() * 9 / 10], longest / 60,
+				Upgrades.stars(distances[distances.size() / 2] * 100, 6, false)])
+		check(distances[-1] > distances[distances.size() / 2] * 2.5, "%s has the occasional huge run" % Upgrades.PRESET_NAMES[preset])
+	check(medians[0] > 80, "stock flights are not pathetic")
+	check(medians[1] > medians[0] * 1.6 and medians[2] > medians[1] * 1.6, "upgrades clearly pay off: " + str(medians))

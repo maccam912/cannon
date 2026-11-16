@@ -4,6 +4,7 @@ extends Control
 signal solo_pressed
 signal host_pressed
 signal join_pressed(code: String)
+signal upgrades_pressed
 
 const Style := preload("res://game/ui/style.gd")
 
@@ -15,6 +16,7 @@ var _sound: Button
 var _main: VBoxContainer
 var _join: VBoxContainer
 var _busy := false
+var _upgrades: Button
 var _title: Label
 var _tagline: Label
 
@@ -41,11 +43,9 @@ func _ready() -> void:
 	row.add_child(left)
 	_title = Style.label("CANNONAUTS", 104, Style.ORANGE, true)
 	Style.outline(_title, 22)
-	_title.clip_text = true
 	left.add_child(_title)
 	_tagline = Style.label("Pump it. Fire it. Out-fly your friends.", 30)
 	Style.outline(_tagline, 10)
-	_tagline.clip_text = true
 	left.add_child(_tagline)
 	get_viewport().size_changed.connect(_fit_title)
 	_fit_title()
@@ -88,7 +88,7 @@ func _ready() -> void:
 	_name.placeholder_text = "Your name"
 	_name.max_length = 12
 	_name.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_name.custom_minimum_size.y = 64
+	_name.custom_minimum_size.y = 58
 	_name.text = Save.player_name
 	_name.text_changed.connect(func(text: String) -> void:
 		Save.player_name = text.strip_edges()
@@ -96,6 +96,7 @@ func _ready() -> void:
 	_main.add_child(_name)
 	_add(_main, "SOLO LAUNCH", Style.ORANGE, func() -> void: solo_pressed.emit())
 	_add(_main, "HOST A PARTY", Style.BLUE, func() -> void: host_pressed.emit())
+	_upgrades = _add(_main, "UPGRADES", Style.PURPLE, func() -> void: upgrades_pressed.emit())
 	_add(_main, "JOIN A PARTY", Style.GREEN, func() -> void: _show_join(true))
 
 	_join = VBoxContainer.new()
@@ -169,6 +170,8 @@ func _submit_join() -> void:
 func refresh() -> void:
 	_best.text = "BEST  " + Style.meters(Save.best_cm) if Save.best_cm > 0 else ""
 	_sound.text = "SOUND OFF" if Save.muted else "SOUND ON"
+	# The star count, with a nudge when something is affordable.
+	_upgrades.text = "UPGRADE%s  -  %d" % ["!" if Save.can_buy_any() else "S", Save.stars]
 
 func set_status(text: String) -> void:
 	_status.text = "" if text in ["Offline", "Connected", "Hosting"] else text

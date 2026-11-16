@@ -126,8 +126,8 @@ func _texture(sprite: String) -> Texture2D:
 	return _textures[sprite]
 
 ## Fresh course with the local cannonaut loaded in the cannon.
-func setup(course_seed: int, slot: int) -> void:
-	course = Course.new(course_seed)
+func setup(course_seed: int, slot: int, levels: Variant = null) -> void:
+	course = Flight.make_course(course_seed, levels)
 	for nodes: Array in _chunks.values():
 		for node: Node in nodes:
 			node.queue_free()
@@ -410,7 +410,7 @@ func _process(delta: float) -> void:
 
 func _target_zoom() -> float:
 	var view := get_viewport_rect().size
-	var tall := clampf(_focus.y * 1.1 + 12.0 + _speed * 0.08, 16.0, 40.0)
+	var tall := clampf(_focus.y * 1.1 + 12.0 + _speed * 0.12, 16.0, 52.0)
 	return view.y / (tall * PPM)
 
 func _snap_camera() -> void:

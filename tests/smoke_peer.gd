@@ -4,6 +4,7 @@ extends "res://tests/harness.gd"
 
 const Party := preload("res://game/sim/party.gd")
 const Flight := preload("res://game/sim/flight.gd")
+const Upgrades := preload("res://game/sim/upgrades.gd")
 
 var session: Node
 var role_name := "peer"
@@ -30,6 +31,7 @@ func run() -> void:
 		file.close()
 		check(await _wait(func() -> bool: return session.roster.size() >= 3, 60.0), "two clients joined")
 		session.set_rounds(1)
+		session.set_power(1)
 		session.start_match()
 		var mine := await _play(300, 800, "t40")
 		check(await _wait(func() -> bool: return session.phase == Party.Phase.RESULTS, 60.0), "round resolved")
@@ -51,7 +53,9 @@ func run() -> void:
 		check(joined, "client starts joining")
 		check(await _wait(func() -> bool: return session.connected() and session.roster.size() >= 3, 60.0), "client sees the full party")
 		check(not session.entry(session.local_id).is_empty(), "client is on the roster")
-		var mine := await _play(450 + session.local_id % 7 * 10, 600, "t30d50")
+		# Long enough that the input log has to travel in several pieces.
+		var mine := await _play(450 + session.local_id % 7 * 10, 600, "t30d50" + "d40".repeat(400))
+		check(session.power == 1, "client heard the party's power level")
 		check(await _wait(func() -> bool: return session.phase == Party.Phase.FINAL, 60.0), "client saw the final")
 		check(session.entry(session.local_id).round_cm == mine,
 				"host's replay matches this client's flight: %d vs %d" % [session.entry(session.local_id).round_cm, mine])
@@ -69,7 +73,7 @@ func _play(angle: int, power: int, plan: String) -> int:
 	if not await _wait(func() -> bool: return session.phase == Party.Phase.PLAYING, 60.0):
 		check(false, "round never started")
 		return -1
-	var flight: Flight = Flight.replay(session.round_seed, angle, power, Flight.decode_inputs(plan))
+	var flight: Flight = Flight.replay(session.round_seed, angle, power, Flight.decode_inputs(plan), Upgrades.preset(session.power))
 	for step in 8:
 		session.report(flight.x * (step + 1) / 8.0, 3.0, session.FLYING)
 		await create_timer(0.15).timeout

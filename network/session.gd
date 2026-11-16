@@ -12,9 +12,11 @@ signal roster_changed
 
 const Party := preload("res://game/sim/party.gd")
 
-const PROTOCOL := 1
+const PROTOCOL := 2
 const CONNECT_TIMEOUT_MS := 18000
 const MAX_PACKET := 1024
+const INPUT_CHUNK := 800     # characters of input log per message
+const MAX_INPUT_CHUNKS := 9
 const GHOST_INTERVAL := 6   # physics ticks between position updates (10 Hz)
 const AIMING := 0
 const FLYING := 1
@@ -30,6 +32,7 @@ var player_name := "Player"
 var phase: int = Party.Phase.LOBBY
 var round_number := 0
 var rounds := 3
+var power := 0
 var round_seed := 0
 var phase_ends_msec := 0
 ## [{id, name, slot, total_cm, round_cm, best_cm, playing}] in join order.
@@ -48,6 +51,8 @@ var _clock := 0
 var _sent_phase := -1
 var _sent_roster := -1
 var _local_ghost := {"x": 0.0, "y": 0.0, "state": AIMING}
+## Host: input logs arriving in pieces, sender -> {round, parts}.
+var _input_parts: Dictionary = {}
 
 func available() -> bool:
 	if not ClassDB.class_exists("IrohServer") or not ClassDB.class_exists("IrohClient"):
@@ -108,6 +113,8 @@ func leave() -> void:
 	party = null
 	pending.clear()
 	ghosts.clear()
+	_input_parts.clear()
+	power = 0
 	roster = []
 	phase = Party.Phase.LOBBY
 	round_number = 0
@@ -162,6 +169,10 @@ func set_rounds(count: int) -> void:
 	if role == "host":
 		party.set_rounds(local_id, count)
 
+func set_power(index: int) -> void:
+	if role == "host":
+		party.set_power(local_id, index)
+
 ## Where the local cannonaut is; shown to everyone else as a ghost.
 func report(x: float, y: float, state: int) -> void:
 	_local_ghost = {"x": x, "y": y, "state": state}
@@ -169,11 +180,17 @@ func report(x: float, y: float, state: int) -> void:
 		ghosts[local_id] = _local_ghost
 
 ## What the local player did this round. The host replays it to get the score.
-func submit(angle: int, power: int, inputs: String) -> void:
+func submit(angle: int, pressure: int, inputs: String) -> void:
 	if role == "host":
-		party.submit(local_id, round_number, angle, power, inputs)
+		party.submit(local_id, round_number, angle, pressure, inputs)
 	elif role == "client" and _welcomed:
-		_send(1, {"type": "result", "r": round_number, "a": angle, "p": power, "i": inputs}, true)
+		# A long flight's log does not fit one packet, so it goes in pieces
+		# on the ordered reliable channel, then the result closes it.
+		var count := 0
+		while count * INPUT_CHUNK < inputs.length():
+			_send(1, {"type": "inputs", "r": round_number, "k": count, "i": inputs.substr(count * INPUT_CHUNK, INPUT_CHUNK)}, true)
+			count += 1
+		_send(1, {"type": "result", "r": round_number, "a": angle, "p": pressure, "n": count}, true)
 
 # --- Transport ---------------------------------------------------------------
 
@@ -187,6 +204,7 @@ func _peer_connected(id: int) -> void:
 func _peer_disconnected(id: int) -> void:
 	pending.erase(id)
 	ghosts.erase(id)
+	_input_parts.erase(id)
 	if party != null:
 		party.remove_player(id)
 
@@ -240,6 +258,7 @@ func _publish() -> void:
 		_sent_phase = party.phase_revision
 		if party.phase in [Party.Phase.COUNTDOWN, Party.Phase.LOBBY]:
 			ghosts.clear()
+			_input_parts.clear()
 		_mirror_party()
 		_send(0, _phase_message(), true)
 		phase_changed.emit()
@@ -253,6 +272,7 @@ func _mirror_party() -> void:
 	phase = party.phase
 	round_number = party.round_number
 	rounds = party.rounds
+	power = party.power
 	round_seed = party.round_seed
 	phase_ends_msec = Time.get_ticks_msec() + party.ticks_left() * 1000 / 60
 	roster = []
@@ -263,7 +283,7 @@ func _mirror_party() -> void:
 
 func _phase_message() -> Dictionary:
 	return {"type": "phase", "ph": party.phase, "r": party.round_number, "n": party.rounds,
-			"seed": party.round_seed, "t": party.ticks_left()}
+			"u": party.power, "seed": party.round_seed, "t": party.ticks_left()}
 
 func _roster_message() -> Dictionary:
 	var rows: Array = []
@@ -296,8 +316,14 @@ func _receive(sender: int, message: Dictionary) -> void:
 				if message.get("r") == round_number and _number(message.get("x")) and _number(message.get("y")) and message.get("s") in [0.0, 1.0, 2.0]:
 					ghosts[sender] = {"x": clampf(float(message.x), 0.0, 1000000.0),
 							"y": clampf(float(message.y), 0.0, 10000.0), "state": int(message.s)}
+			elif kind == "inputs":
+				_accept_inputs(sender, message)
 			elif kind == "result":
-				party.submit(sender, message.get("r"), message.get("a"), message.get("p"), message.get("i"))
+				var received: Dictionary = _input_parts.get(sender, {})
+				_input_parts.erase(sender)
+				var parts: Array = received.get("parts", []) if received.get("round") == message.get("r") else []
+				if message.get("n") == parts.size():
+					party.submit(sender, message.get("r"), message.get("a"), message.get("p"), "".join(parts))
 	elif role == "client" and sender == Party.HOST_ID:
 		if kind == "welcome" and message.get("version") == PROTOCOL:
 			_welcomed = true
@@ -311,15 +337,32 @@ func _receive(sender: int, message: Dictionary) -> void:
 		elif kind == "ghosts":
 			_accept_ghosts(message)
 
+## Host: one piece of a client's input log. Pieces must arrive in order for
+## the current round, and there is a hard cap on how many.
+func _accept_inputs(sender: int, message: Dictionary) -> void:
+	var piece: Variant = message.get("i")
+	if message.get("r") != round_number or not piece is String or piece.length() > INPUT_CHUNK or not _whole(message.get("k")):
+		_input_parts.erase(sender)
+		return
+	var received: Dictionary = _input_parts.get(sender, {})
+	if received.get("round") != round_number:
+		received = {"round": round_number, "parts": []}
+	if int(message.k) != received.parts.size() or received.parts.size() >= MAX_INPUT_CHUNKS:
+		_input_parts.erase(sender)
+		return
+	received.parts.append(piece)
+	_input_parts[sender] = received
+
 func _accept_phase(message: Dictionary) -> void:
-	for key in ["ph", "r", "n", "seed", "t"]:
+	for key in ["ph", "r", "n", "u", "seed", "t"]:
 		if not _whole(message.get(key)):
 			return
-	if int(message.ph) < 0 or int(message.ph) >= Party.Phase.size() or int(message.r) < 0 or int(message.r) > 99 or not int(message.n) in Party.ROUND_CHOICES or int(message.t) < 0 or int(message.t) > Party.ROUND_TICKS:
+	if int(message.ph) < 0 or int(message.ph) >= Party.Phase.size() or int(message.r) < 0 or int(message.r) > 99 or not int(message.n) in Party.ROUND_CHOICES or int(message.u) < 0 or int(message.u) > 2 or int(message.t) < 0 or int(message.t) > Party.ROUND_TICKS:
 		return
 	phase = int(message.ph)
 	round_number = int(message.r)
 	rounds = int(message.n)
+	power = int(message.u)
 	round_seed = int(message.seed)
 	phase_ends_msec = Time.get_ticks_msec() + int(message.t) * 1000 / 60
 	if phase in [Party.Phase.COUNTDOWN, Party.Phase.LOBBY]:

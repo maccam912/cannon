@@ -5,11 +5,13 @@ signal leave_pressed
 
 const Style := preload("res://game/ui/style.gd")
 const Party := preload("res://game/sim/party.gd")
+const Upgrades := preload("res://game/sim/upgrades.gd")
 
 var _code: Label
 var _expiry: Label
 var _players: GridContainer
 var _rounds: HBoxContainer
+var _power: HBoxContainer
 var _start: Button
 var _hint: Label
 var _share: HBoxContainer
@@ -76,6 +78,9 @@ func _ready() -> void:
 	_rounds = HBoxContainer.new()
 	_rounds.add_theme_constant_override("separation", 10)
 	right.add_child(_rounds)
+	_power = HBoxContainer.new()
+	_power.add_theme_constant_override("separation", 10)
+	right.add_child(_power)
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 12)
 	right.add_child(buttons)
@@ -118,7 +123,7 @@ func refresh() -> void:
 	elif _hint.text.begins_with("Waiting"):
 		_hint.text = ""
 	# Rebuild only when something visible changed, so taps are never eaten.
-	var signature := str(Session.roster.map(func(row: Dictionary) -> String: return "%d%s%d" % [row.id, row.name, row.slot])) + str(Session.rounds) + str(host) + str(Session.local_id)
+	var signature := str(Session.roster.map(func(row: Dictionary) -> String: return "%d%s%d" % [row.id, row.name, row.slot])) + str(Session.rounds) + str(Session.power) + str(host) + str(Session.local_id)
 	if signature == _signature:
 		return
 	_signature = signature
@@ -127,7 +132,7 @@ func refresh() -> void:
 		child.queue_free()
 	for seat in Party.MAX_PLAYERS:
 		var chip := PanelContainer.new()
-		chip.custom_minimum_size = Vector2(230, 58)
+		chip.custom_minimum_size = Vector2(230, 50)
 		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", 10)
@@ -163,8 +168,23 @@ func refresh() -> void:
 	for count: int in Party.ROUND_CHOICES:
 		if host:
 			var pick := Style.button(str(count), Style.BLUE if count == Session.rounds else Style.SLATE, 26)
-			pick.custom_minimum_size = Vector2(84, 60)
+			pick.custom_minimum_size = Vector2(84, 54)
 			pick.pressed.connect(func() -> void: Session.set_rounds(count))
 			_rounds.add_child(pick)
 		elif count == Session.rounds:
 			_rounds.add_child(Style.label(str(count), 30, Style.CREAM, true))
+	# Everyone flies the same upgrade level, picked by the host.
+	for child: Node in _power.get_children():
+		_power.remove_child(child)
+		child.queue_free()
+	var power_caption := Style.label("POWER", 24, Color(Style.CREAM, 0.75), true)
+	power_caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_power.add_child(power_caption)
+	for index in Upgrades.PRESET_NAMES.size():
+		if host:
+			var choice := Style.button(Upgrades.PRESET_NAMES[index], Style.PURPLE if index == Session.power else Style.SLATE, 20)
+			choice.custom_minimum_size = Vector2(110, 54)
+			choice.pressed.connect(func() -> void: Session.set_power(index))
+			_power.add_child(choice)
+		elif index == Session.power:
+			_power.add_child(Style.label(Upgrades.PRESET_NAMES[index], 26, Style.CREAM, true))

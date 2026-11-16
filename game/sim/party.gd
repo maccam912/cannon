@@ -9,6 +9,7 @@ extends RefCounted
 
 const Flight := preload("res://game/sim/flight.gd")
 const Rng := preload("res://game/sim/rng.gd")
+const Upgrades := preload("res://game/sim/upgrades.gd")
 
 enum Phase { LOBBY, COUNTDOWN, PLAYING, RESULTS, FINAL }
 
@@ -26,6 +27,8 @@ const VERIFY_BUDGET := 1500
 var phase := Phase.LOBBY
 var round_number := 0
 var rounds := 3
+## Everyone flies the same upgrade preset, so a party is always a fair fight.
+var power := 0
 var round_seed := 0
 var timer := 0
 ## id -> {name, slot, total_cm, round_cm, best_cm, playing}
@@ -70,6 +73,13 @@ func set_rounds(by: int, count: int) -> bool:
 	phase_revision += 1
 	return true
 
+func set_power(by: int, index: int) -> bool:
+	if by != HOST_ID or phase != Phase.LOBBY or index < 0 or index >= Upgrades.PRESET_NAMES.size():
+		return false
+	power = index
+	phase_revision += 1
+	return true
+
 func start(by: int) -> bool:
 	if by != HOST_ID or not phase in [Phase.LOBBY, Phase.FINAL] or players.is_empty():
 		return false
@@ -98,21 +108,21 @@ func advance(by: int) -> bool:
 
 ## A client's account of its flight. Rejected unless it is this round's, from
 ## someone still owed a result, and well formed; the distance is never sent.
-func submit(id: int, for_round: Variant, angle: Variant, power: Variant, inputs: Variant) -> bool:
+func submit(id: int, for_round: Variant, angle: Variant, pressure: Variant, inputs: Variant) -> bool:
 	if phase != Phase.PLAYING or not players.has(id):
 		return false
 	var player: Dictionary = players[id]
 	if not player.playing or player.round_cm >= 0 or _has_job(id):
 		return false
-	if not _whole(for_round) or int(for_round) != round_number or not _whole(angle) or not _whole(power) or not inputs is String:
+	if not _whole(for_round) or int(for_round) != round_number or not _whole(angle) or not _whole(pressure) or not inputs is String:
 		return false
-	if int(angle) < Flight.MIN_ANGLE or int(angle) > Flight.MAX_ANGLE or int(power) < 0 or int(power) > Flight.MAX_POWER:
+	if int(angle) < Flight.MIN_ANGLE or int(angle) > Flight.MAX_ANGLE or int(pressure) < 0 or int(pressure) > Flight.MAX_POWER:
 		return false
 	var log: Variant = Flight.decode_inputs(inputs)
 	if log == null:
 		return false
-	var flight := Flight.new(round_seed)
-	flight.launch(int(angle), int(power))
+	var flight := Flight.new(round_seed, Upgrades.preset(power))
+	flight.launch(int(angle), int(pressure))
 	_jobs.append({"id": id, "flight": flight, "log": log, "next": 0})
 	return true
 

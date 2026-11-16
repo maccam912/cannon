@@ -11,6 +11,9 @@ const Style := preload("res://game/ui/style.gd")
 const Aim := preload("res://game/sim/aim.gd")
 const Flight := preload("res://game/sim/flight.gd")
 
+## Thrust pips: how many the cannonaut starts with and can hold at most.
+var base_thrusts := Flight.START_THRUSTS
+var max_thrusts := Flight.START_THRUSTS + Flight.SPARE_THRUSTS
 var flying := false   # true while taps mean thrust/dive rather than pump/fire
 
 var _margin: MarginContainer
@@ -240,7 +243,7 @@ func show_result(title: String, big: String, sub: String, rows: Array, buttons: 
 		child.queue_free()
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 10)
-	box.custom_minimum_size.x = 560
+	box.custom_minimum_size.x = 560 if buttons.size() < 3 else 700
 	_result.add_child(box)
 	var heading := Style.label(title, 38, title_color, true)
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -280,7 +283,7 @@ func show_result(title: String, big: String, sub: String, rows: Array, buttons: 
 		bar.alignment = BoxContainer.ALIGNMENT_CENTER
 		box.add_child(bar)
 		for entry: Array in buttons:
-			var button := Style.button(entry[0], entry[1])
+			var button := Style.button(entry[0], entry[1], 30 if buttons.size() < 3 else 24)
 			button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			button.pressed.connect(entry[2])
 			bar.add_child(button)
@@ -369,10 +372,11 @@ func _draw_hints() -> void:
 			var key_extent := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, 13)
 			_hints.draw_string(font, centre + Vector2(-key_extent.x / 2.0, 32), key, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(Style.CREAM, 0.7))
 		if which == "thrust":
-			for pip in Flight.MAX_THRUSTS:
-				var at := centre + Vector2((pip - (Flight.MAX_THRUSTS - 1) / 2.0) * 26.0, -112)
+			var spacing := minf(26.0, 200.0 / max_thrusts)
+			for pip in max_thrusts:
+				var at := centre + Vector2((pip - (max_thrusts - 1) / 2.0) * spacing, -112)
 				if pip < _thrusts:
-					_hints.draw_circle(at, 10, Style.ORANGE)
-					_hints.draw_arc(at, 10, 0, TAU, 20, Style.CREAM, 2.5, true)
-				elif pip < Flight.START_THRUSTS:
-					_hints.draw_arc(at, 9, 0, TAU, 20, Color(Style.CREAM, 0.35), 2.0, true)
+					_hints.draw_circle(at, spacing * 0.38, Style.ORANGE)
+					_hints.draw_arc(at, spacing * 0.38, 0, TAU, 20, Style.CREAM, 2.5, true)
+				elif pip < base_thrusts:
+					_hints.draw_arc(at, spacing * 0.34, 0, TAU, 20, Color(Style.CREAM, 0.35), 2.0, true)

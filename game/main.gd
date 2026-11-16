@@ -10,6 +10,9 @@ const World := preload("res://game/world.gd")
 const Hud := preload("res://game/hud.gd")
 const Menu := preload("res://game/ui/menu.gd")
 const Lobby := preload("res://game/ui/lobby.gd")
+const Shop := preload("res://game/ui/shop.gd")
+const Course := preload("res://game/sim/course.gd")
+const Upgrades := preload("res://game/sim/upgrades.gd")
 
 enum Mode { MENU, LOBBY, SOLO, PARTY }
 enum Stage { IDLE, COUNTDOWN, AIMING, FLYING, LANDED, WATCHING }
@@ -20,6 +23,10 @@ var world: World
 var hud: Hud
 var menu: Menu
 var lobby: Lobby
+var shop: Shop
+## Upgrade levels in force for the current launch: your own in solo, the
+## host's preset in a party.
+var levels: Dictionary = {}
 
 var aim: Aim
 var flight: Flight
@@ -50,6 +57,11 @@ func _ready() -> void:
 	layer.add_child(menu)
 	lobby = Lobby.new()
 	layer.add_child(lobby)
+	shop = Shop.new()
+	layer.add_child(shop)
+	shop.back_pressed.connect(_show_menu)
+	shop.launch_pressed.connect(_start_solo)
+	menu.upgrades_pressed.connect(_show_shop)
 	hud.primary.connect(_on_primary)
 	hud.secondary.connect(_on_secondary)
 	hud.menu_pressed.connect(_leave_to_menu)
@@ -91,6 +103,7 @@ func _show(screen: Control) -> void:
 	menu.visible = screen == menu
 	lobby.visible = screen == lobby
 	hud.visible = screen == hud
+	shop.visible = screen == shop
 
 func _show_menu() -> void:
 	mode = Mode.MENU
@@ -129,9 +142,17 @@ func _start_solo() -> void:
 	mode = Mode.SOLO
 	_show(hud)
 	Sfx.music("music_flight")
-	_begin_round(randi(), 0)
-	hud.set_info("BEST  " + Style.meters(Save.best_cm) if Save.best_cm > 0 else "")
+	_begin_round(randi(), 0, Save.levels)
+	if world.course.event == Course.Event.NONE:
+		hud.set_info("BEST  " + Style.meters(Save.best_cm) if Save.best_cm > 0 else "")
 	_start_aim(0)
+
+## The shop sits over the menu's demo flights; mode stays MENU underneath.
+func _show_shop() -> void:
+	if mode != Mode.MENU:
+		_show_menu()
+	shop.refresh()
+	_show(shop)
 
 # --- Party -----------------------------------------------------------------------
 
@@ -197,7 +218,7 @@ func _enter_party_round() -> void:
 	_final_announced = false
 	_show(hud)
 	Sfx.music("music_flight")
-	_begin_round(Session.round_seed, int(Session.entry(Session.local_id).get("slot", 0)))
+	_begin_round(Session.round_seed, int(Session.entry(Session.local_id).get("slot", 0)), Upgrades.preset(Session.power))
 	hud.set_info("ROUND %d OF %d" % [Session.round_number, Session.rounds])
 
 func _on_roster_changed() -> void:
@@ -242,9 +263,10 @@ func _show_party_results(final: bool) -> void:
 
 # --- One launch ----------------------------------------------------------------
 
-func _begin_round(new_seed: int, new_slot: int) -> void:
+func _begin_round(new_seed: int, new_slot: int, new_levels: Dictionary) -> void:
 	course_seed = new_seed
 	slot = new_slot
+	levels = Upgrades.clean(new_levels)
 	flight = null
 	aim = null
 	input_log = []
@@ -252,15 +274,23 @@ func _begin_round(new_seed: int, new_slot: int) -> void:
 	_watching = ""
 	stage = Stage.IDLE
 	world.muted = false
-	world.setup(course_seed, slot)
+	world.setup(course_seed, slot, levels)
 	world.set_aim(45.0, 0.0)
 	hud.reset()
+	hud.base_thrusts = Flight.START_THRUSTS + int(levels.thrusters)
+	hud.max_thrusts = hud.base_thrusts + Flight.SPARE_THRUSTS
 
 func _start_aim(deadline_ticks: int) -> void:
 	aim = Aim.new()
 	_aim_ticks_left = deadline_ticks
 	stage = Stage.AIMING
 	hud.show_aim(aim)
+	# A wild course announces itself before you pump.
+	var event: int = world.course.event
+	if event != Course.Event.NONE:
+		hud.show_banner(Course.EVENT_NAMES[event], Course.EVENT_BLURBS[event], 2.4, Color(1.0, 0.85, 0.3))
+		hud.set_info(Course.EVENT_NAMES[event])
+		Sfx.play("perfect")
 
 func _on_primary() -> void:
 	if stage == Stage.AIMING:
@@ -286,7 +316,7 @@ func _on_secondary() -> void:
 		_on_primary()
 
 func _fire() -> void:
-	flight = Flight.new(course_seed)
+	flight = Flight.new(course_seed, levels)
 	flight.launch(aim.angle_decideg, aim.power_permille)
 	_from = Vector2(flight.x, flight.y)
 	input_log = []
@@ -305,18 +335,21 @@ func _landed() -> void:
 	_landed_at = Time.get_ticks_msec()
 	hud.flying = false
 	var distance := flight.distance_cm()
+	var stars := Upgrades.stars(distance, flight.coins, flight.perfect)
+	Save.award(stars)
 	if mode == Mode.SOLO:
 		var is_best := Save.record(distance)
 		if is_best:
 			Sfx.play("fanfare")
 		hud.show_result("NEW BEST!" if is_best else "TOUCHDOWN", Style.meters(distance),
-				"Best %s  -  top height %d m  -  %d coins" % [Style.meters(Save.best_cm), int(flight.max_height), flight.coins],
-				[], [["MENU", Style.SLATE, _show_menu], ["LAUNCH AGAIN", Style.ORANGE, _start_solo]],
+				"+%d stars  -  you have %d  -  best %s" % [stars, Save.stars, Style.meters(Save.best_cm)],
+				[], [["MENU", Style.SLATE, _show_menu], ["UPGRADE!" if Save.can_buy_any() else "UPGRADES", Style.GREEN if Save.can_buy_any() else Style.PURPLE, _show_shop],
+				["LAUNCH AGAIN", Style.ORANGE, _start_solo]],
 				Color(1.0, 0.85, 0.3) if is_best else Style.ORANGE)
 	elif mode == Mode.PARTY:
 		Session.submit(aim.angle_decideg, aim.power_permille, Flight.encode_inputs(input_log))
 		Session.report(flight.x, 0.0, Session.LANDED)
-		hud.show_banner(Style.meters(distance), "Waiting for the others to land")
+		hud.show_banner(Style.meters(distance), "+%d stars  -  waiting for the others to land" % stars)
 
 func _physics_process(_delta: float) -> void:
 	if mode == Mode.MENU or mode == Mode.LOBBY:
@@ -357,9 +390,9 @@ func _demo_tick() -> void:
 			return
 		_demo_wait = 120
 		course_seed = randi()
-		world.setup(course_seed, randi() % 5)
+		world.setup(course_seed, randi() % 5, Save.levels)
 		world.set_aim(42.0, 0.0)
-		flight = Flight.new(course_seed)
+		flight = Flight.new(course_seed, Save.levels)
 		flight.launch(380 + randi() % 120, 700 + randi() % 300)
 		_from = Vector2(flight.x, flight.y)
 		world.fire()
