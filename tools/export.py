@@ -34,14 +34,17 @@ def export(platform, skip_build=False):
     if platform == "android":
         from android import prepare
         _, _, key = prepare()
-        os.environ["TEMPLATE_DEBUG_KEYSTORE"] = str(key)
+        # A release build (smaller and faster than a debug one), signed with
+        # the development key: fine for sideloading, not a store identity.
+        os.environ["GODOT_ANDROID_KEYSTORE_RELEASE_PATH"] = str(key)
+        os.environ["GODOT_ANDROID_KEYSTORE_RELEASE_USER"] = "androiddebugkey"
+        os.environ["GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD"] = "android"
     run(["--headless", "--editor", "--import"], timeout=180)
     preset, name = PRESETS[platform]
     destination = ROOT / "build" / platform
     destination.mkdir(parents=True, exist_ok=True)
     output = destination / name
-    # Android is intentionally a development-signed APK; no store credentials needed.
-    run(["--headless", "--export-debug" if platform == "android" else "--export-release", preset, str(output)], timeout=900)
+    run(["--headless", "--export-release", preset, str(output)], timeout=900)
     if not output.exists() or output.stat().st_size == 0:
         raise RuntimeError("Godot did not produce " + str(output))
     if platform == "android":

@@ -51,11 +51,11 @@ func _ready() -> void:
 
 	_distance = Style.label("", 64, Style.CREAM, true)
 	Style.outline(_distance, 14)
-	_distance.position = Vector2(8, -8)
+	_distance.position = Vector2(8, 2)
 	layer.add_child(_distance)
 	_detail = Style.label("", 26)
 	Style.outline(_detail, 8)
-	_detail.position = Vector2(12, 66)
+	_detail.position = Vector2(12, 84)
 	layer.add_child(_detail)
 
 	_info = Style.label("", 28, Style.CREAM, true)

@@ -1,121 +1,130 @@
-# Networking contract
+# Networking
+
+## Shape of a party
+
+Cannonauts is a launch game, so players do not interact mid-flight. That makes
+the multiplayer model simple and cheap:
+
+- **Same course, same moment.** The host picks a seed per round. Every device
+  generates the identical course from it and launches after the same countdown.
+- **Fly locally.** Each device simulates its own cannonaut at 60 Hz with no
+  network in the loop, so controls feel the same on a bad connection.
+- **Replay to score.** When a flight ends, the client sends what it did: launch
+  angle, pressure, and the ticks at which it thrust or dived. The host replays
+  that through the same simulation and records its own answer.
+- **Ghosts are cosmetic.** Positions are relayed ten times a second so you can
+  watch the others. They never affect a score.
+
+The host is one of the players. There is no dedicated server and no host
+migration: if the host leaves, the party ends.
 
 ## Layers
 
-`Rooms` creates/resolves/revokes a four-character code through the existing HTTP
-service. It then gives `Session` a public Iroh endpoint ID. `Session` polls an
-`IrohServer` or `IrohClient` and implements this demo's protocol. Rust owns Iroh,
-QUIC streams/datagrams, and a two-thread Tokio runtime. Godot objects stay on the
-main thread; async networking communicates through bounded queues.
-
-The code service is **discovery**, not a game server or packet relay. Game messages
-use Iroh. The host simulates the world. Iroh can establish direct routes and use
-its N0 preset relays when necessary. `--relay-only` disables direct IP transports
-for testing. No inbound port-forwarding setup is required for the relay route.
-
-## Godot-facing interface
-
-```gdscript
-await Rooms.host()             # Host and obtain a short code
-await Rooms.join("ABCD")       # Resolve code then connect
-Session.host()                 # Host without HTTP discovery
-Session.join(full_ticket)      # Connect without HTTP discovery
-Session.direction = Vector2(1, 0)
-Session.send_chat("Hello")
-Session.leave()
-```
-
-Use the scene-tree `Session` and `Rooms` autoloads; no project-specific game class
-is needed. `Session.players` maps numeric connection IDs to demo positions.
-`status_changed`, `chat_received`, and `Rooms.changed` drive UI. Host ID is 1.
-Clients are assigned IDs >= 2; those IDs are session-local and are not accounts.
-
-The native objects derive from `MultiplayerPeerExtension`, but this template
-**polls packets directly**. Do not also assign the same peer to
-`multiplayer.multiplayer_peer`: Godot would poll/consume the same stream. This
-transport does not implement high-level SceneMultiplayer's relay/authentication
-protocol. `@rpc`, `MultiplayerSpawner`, and `MultiplayerSynchronizer` are not a
-promised drop-in feature. Build and test a separate adapter if your game needs them.
-
-## Demo wire protocol
-
-The application ALPN is `godot-iroh-template/1` in Rust's `lib.rs`. JSON messages
-are UTF-8 and at most 1024 bytes. Objects are parsed as data, never deserialized
-as Godot objects. The native ceiling is 1200 bytes reliable / 1024 bytes unreliable.
-Four native channel IDs (0–3) are available.
-
-| Channel | Delivery | Messages |
+| Layer | File | Job |
 | --- | --- | --- |
-| 0 | Reliable, ordered stream | `hello`, `welcome`, `chat` |
-| 1 | Unreliable, ordered datagrams | `input`, `state` |
+| Rules | `game/sim/party.gd` | Phases, rounds, verification, standings. No I/O. |
+| Protocol | `network/session.gd` | Messages, validation, the mirrored view |
+| Codes | `network/rooms.gd`, `rendezvous.gd` | Four-character code create/resolve/revoke |
+| Transport | `native/iroh/` | Iroh QUIC streams and datagrams (Rust) |
 
-The client first sends `hello` with version 1. The host admits at most eight total
-players, rejects mismatched versions, and times out unintroduced peers after five
-seconds. The Rust connection attempt has a 15-second deadline; the Godot welcome
-deadline is 18 seconds. Reliable channel order is preserved within the channel;
-there is no cross-channel ordering guarantee.
+`Session` exposes the same view on every device (`phase`, `round_number`,
+`rounds`, `round_seed`, `roster`, `ghosts`), so screens do not care about role.
+Only the host owns a `Party`.
 
-Clients send an input direction at 20 Hz. The host clamps its length to one,
-applies speed and arena limits at Godot's physics tick, and stops stale inputs after
-500 ms. Clients never submit authoritative positions. The host sends whole-world
-snapshots at 20 Hz. Clients only accept snapshots from host ID 1. Chat is limited
-to 160 characters and the host accepts at most one message per peer per 750 ms.
+The code service is discovery only: it maps a short code to the host's Iroh
+endpoint ID. Game traffic goes over Iroh, directly when possible and through
+N0's relays otherwise. No port forwarding is needed.
 
-The demo displays snapshots directly. Prediction, rollback, interpolation,
-reconnect/resume, persistent identities, lobby ready/start rules, and host migration
-are deliberately left to the game. A disconnect returns to the offline playground.
+## Why replays agree
+
+`game/sim/flight.gd` is written to produce bit-identical results everywhere:
+
+- fixed 60 Hz ticks, never frame time;
+- 64-bit scalar floats with `+ - * /` and `sqrt` only (all exactly rounded by
+  IEEE 754), no `Vector2` (32-bit) and no libm `sin`/`cos` (the launch angle
+  uses a Taylor series built from basic arithmetic);
+- an integer xorshift generator with explicit 32-bit masks for the course.
+
+`tests/sim_test.gd` checks golden distances recorded on Apple Silicon; CI
+replays them on x86 Linux and Windows. `tests/smoke_peer.gd` has separate
+processes compare the host's verified distance with their own.
+
+## Wire protocol
+
+The application ALPN is `cannonauts/1` (`native/iroh/src/lib.rs`) and the code
+namespace is `cannonauts/1` (`project.godot`). Messages are UTF-8 JSON, at most
+1024 bytes, parsed as plain data.
+
+| Channel | Delivery | Client to host | Host to clients |
+| --- | --- | --- | --- |
+| 0 | Reliable, ordered | `hello`, `result` | `welcome`, `phase`, `roster` |
+| 1 | Unreliable, ordered | `pos` | `ghosts` |
+
+| Message | Fields |
+| --- | --- |
+| `hello` | `version`, `name` |
+| `welcome` | `version` |
+| `phase` | `ph` phase, `r` round, `n` rounds, `seed`, `t` ticks left |
+| `roster` | `p`: rows of `[id, name, slot, total_cm, round_cm, best_cm, playing]` |
+| `result` | `r` round, `a` angle in tenths of a degree, `p` pressure per mille, `i` input log |
+| `pos` | `r`, `x`, `y`, `s` state (0 aiming, 1 flying, 2 landed) |
+| `ghosts` | `r`, `g`: rows of `[id, x, y, state]` |
+
+The input log is a string of `<letter><ticks since the previous input>` with
+`t` for thrust and `d` for dive, so `t12d40` means thrust at tick 12 and dive at
+tick 52. It is capped at 200 inputs and 900 characters.
+
+Phases: `LOBBY`, `COUNTDOWN` (3 s), `PLAYING`, `RESULTS`, `FINAL`. Clients must
+fire within 15 seconds of the round starting or the cannon fires for them. A
+round is hard-capped, and anyone who has not reported by then scores zero.
+
+## What the host checks
+
+- `hello` only from a peer that just connected, with the right version, while
+  there is a seat. Unintroduced peers are dropped after five seconds.
+- `result` only during `PLAYING`, for the current round, from a seated player
+  who still owes one, with whole-number angle and pressure inside their legal
+  ranges and a well-formed input log. One result per player per round.
+- The distance is never read from the client. Inputs that could not have taken
+  effect (a fourth thrust, a dive on the ground) simply do nothing in the replay.
+- `pos` values are bounded and never scored.
+- Names are trimmed to twelve printable characters.
+
+Clients accept `phase`, `roster` and `ghosts` only from the host, and discard
+anything malformed or out of range.
+
+Verification is spread over frames (1500 flight ticks per host tick) so a phone
+hosting eight players does not stall.
+
+## Limits worth knowing
+
+- **Pressure and angle are trusted within range.** The pump timing happens on
+  the client, so a modified client could always claim a perfect launch. The
+  flight after that is fully verified. Good enough among friends; not a ranked
+  ladder.
+- **The host is trusted.** It runs the rules and could cheat.
+- **A code is not a password.** Anyone with a valid code can try to join.
+- **Mobile background.** Backgrounding the app closes the session and revokes
+  the code; rejoin or rehost on return.
+- **No reconnect.** A dropped client rejoins as a new player and plays from the
+  next round.
 
 ## Short-code service
 
-Configuration lives in `project.godot`:
+Configured in `project.godot`:
 
 ```ini
 [network]
 iroh/rendezvous_url="https://iroh-rendezvous.maccam912.workers.dev"
-iroh/session_id="godot-iroh-starter/1"
+iroh/session_id="cannonauts/1"
 ```
 
-Change `session_id` for every new game and incompatible application protocol.
-The client rejects a code belonging to a different session namespace. Set the
-URL to an empty string to disable codes, or point it at a service implementing:
+- `POST /v1/join-codes` with `endpoint_id`, `session_id`, `expires_in: 600`
+  returns `code`, `expires_at` and a `revoke_token`.
+- `GET /v1/join-codes/{code}` resolves it, or 404.
+- `DELETE /v1/join-codes/{code}` with the bearer token revokes it.
 
-- `POST /v1/join-codes` with `endpoint_id`, `session_id`, and `expires_in: 600`.
-  Returns `code`, matching IDs, `expires_at` (UTC), and `revoke_token`.
-- `GET /v1/join-codes/{code}` resolves the endpoint/session/expiry, or returns 404.
-- `DELETE /v1/join-codes/{code}` with `Authorization: Bearer <revoke_token>` revokes it.
-
-The supplied service accepts endpoint strings up to 256 characters, so codes store
-the compact 43-character public endpoint ID, not the larger full ticket. Iroh
-address lookup resolves that ID. Full tickets encode the endpoint ID plus current
-address hints and can be useful when a local route is available.
-
-Each new room/code request captures a generation number. Leaving, rehosting,
-or switching joins invalidates it. A late create response is revoked rather than
-displayed. Renewal first creates a replacement and then revokes the old code, so
-service failures do not terminate an existing game. Revocation tokens stay in
-memory. Normal leave/quit attempts revocation; crashes, suspension, or network
-loss can prevent it, so codes expire server-side after ten minutes.
-
-The owner-managed endpoint is configured here with permission for this starter.
-It is not bundled service infrastructure, and its URL is not a secret. If you
-publish a template for other people, decide whether they should share that service
-or configure their own; this project does not deploy or modify the Worker.
-
-## Trust and capacity
-
-Iroh encrypts connections and authenticates the remote endpoint's key. A four-letter
-code is a lookup convenience, not a password or account login. Anyone who obtains
-or guesses a valid code/ticket may attempt to join. Add host approval, invitations,
-or application authentication before using this for private or adversarial rooms.
-
-The host is authoritative but also trusted; this demo does not prevent host cheating.
-Packet sizes, queue sizes, frame receive budgets, player count, and basic numeric
-inputs are bounded. This is a small-room starter, not a claim of Internet-scale
-abuse resistance. Reliable queue saturation reports a send error; there is no
-unbounded retry buffer. Important game transactions should have explicit message
-IDs, acknowledgements, and application-level retry/disconnect policy.
-
-Tickets can contain IP address hints; share them as connection details, not secrets.
-Neither session IDs nor numeric peer IDs establish user identity. The N0 preset
-uses external services: review relay configuration/costs and availability for a
-production game. See [Iroh's connection and trust model](https://docs.rs/iroh/1.4.1/iroh/).
+Codes last ten minutes. While the lobby is open the host renews automatically
+(new code first, then the old one is revoked), and existing connections outlive
+their code. If the service is down, **Copy ticket** in the lobby gives a full
+Iroh ticket that the join box also accepts.

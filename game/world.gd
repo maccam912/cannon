@@ -222,6 +222,11 @@ func set_ghosts(rows: Array) -> void:
 			_ghosts[id].queue_free()
 			_ghosts.erase(id)
 
+## Party spectating: look at someone else once the local flight is over.
+func watch(x: float, y: float, vx: float) -> void:
+	_focus = Vector2(x, y)
+	_speed = vx
+
 func shake(amount: float) -> void:
 	_shake = maxf(_shake, amount)
 
@@ -565,7 +570,8 @@ func _draw_ground(ground: Node2D) -> void:
 		ground.draw_rect(board, Color(1.0, 0.95, 0.85))
 		ground.draw_rect(board, Color(0.45, 0.32, 0.22), false, 4.0)
 		var size := 40 if big else 30
-		ground.draw_string(font, Vector2(board.position.x, board.position.y + board.size.y / 2.0 + size * 0.36), "%d" % int(mark),
+		var baseline := board.get_center().y + (font.get_ascent(size) - font.get_descent(size)) / 2.0
+		ground.draw_string(font, Vector2(board.position.x, baseline), "%d" % int(mark),
 				HORIZONTAL_ALIGNMENT_CENTER, board.size.x, size, Color(0.25, 0.18, 0.14))
 		mark += 100.0
 

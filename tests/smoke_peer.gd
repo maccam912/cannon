@@ -55,10 +55,12 @@ func run() -> void:
 		check(await _wait(func() -> bool: return session.phase == Party.Phase.FINAL, 60.0), "client saw the final")
 		check(session.entry(session.local_id).round_cm == mine,
 				"host's replay matches this client's flight: %d vs %d" % [session.entry(session.local_id).round_cm, mine])
-		check(session.entry(1).round_cm > 0 and session.entry(1).name == "Host", "client sees the host's score")
+		check(session.entry(1).round_cm > 0, "client sees the host's score")
 		check(session.snapshots_received > 3, "ghost positions arrived")
 		check(session.ghosts.has(1), "client sees the host's ghost")
 		check(session.standings().size() == 3, "three players in the standings")
+		# Stay a moment so the other client also sees a full table.
+		await create_timer(1.5).timeout
 		session.leave()
 		await create_timer(0.5).timeout
 

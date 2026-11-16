@@ -15,6 +15,8 @@ var _sound: Button
 var _main: VBoxContainer
 var _join: VBoxContainer
 var _busy := false
+var _title: Label
+var _tagline: Label
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -37,12 +39,16 @@ func _ready() -> void:
 	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(left)
-	var title := Style.label("CANNONAUTS", 104, Style.ORANGE, true)
-	Style.outline(title, 22)
-	left.add_child(title)
-	var tagline := Style.label("Pump it. Fire it. Out-fly your friends.", 30)
-	Style.outline(tagline, 10)
-	left.add_child(tagline)
+	_title = Style.label("CANNONAUTS", 104, Style.ORANGE, true)
+	Style.outline(_title, 22)
+	_title.clip_text = true
+	left.add_child(_title)
+	_tagline = Style.label("Pump it. Fire it. Out-fly your friends.", 30)
+	Style.outline(_tagline, 10)
+	_tagline.clip_text = true
+	left.add_child(_tagline)
+	get_viewport().size_changed.connect(_fit_title)
+	_fit_title()
 	var spacer := Control.new()
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -130,6 +136,15 @@ func _ready() -> void:
 	_status.custom_minimum_size.x = 360
 	stack.add_child(_status)
 	refresh()
+
+## The title takes whatever width the button panel leaves, on any aspect ratio.
+func _fit_title() -> void:
+	var room := get_viewport_rect().size.x - 420.0 - 56.0 * 2.0 - 40.0 - 30.0
+	var font: Font = Style.TITLE_FONT
+	var title_size := clampi(int(104.0 * room / font.get_string_size(_title.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 104).x), 40, 110)
+	_title.add_theme_font_size_override("font_size", title_size)
+	var tag_size := clampi(int(30.0 * room / font.get_string_size(_tagline.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x), 16, 32)
+	_tagline.add_theme_font_size_override("font_size", tag_size)
 
 func _add(parent: Node, text: String, color: Color, action: Callable) -> Button:
 	var button := Style.button(text, color)

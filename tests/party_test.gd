@@ -91,6 +91,8 @@ func _timeouts_and_leavers() -> void:
 		party.add_player(id, "P%d" % id)
 	party.set_rounds(1, 1)
 	party.start(1)
+	check(party.add_player(5, "Just") and party.players[5].playing, "joining during the countdown still plays")
+	party.remove_player(5)
 	_until(party, Party.Phase.PLAYING)
 	check(party.add_player(4, "Late") and not party.players[4].playing, "late joiner sits this round out")
 	check(not party.submit(4, 1, 450, 500, ""), "and cannot score in it")

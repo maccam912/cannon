@@ -2,121 +2,115 @@
 
 ## Local development
 
-`python3 tools/setup.py` installs the pinned engine and builds for the current CPU.
-Use `python3 tools/godot.py --editor` so you get that engine rather than a different
-Godot already on PATH. `python3 tools/godot.py` runs the game.
+`python3 tools/setup.py` downloads the pinned Godot into `.tools/`, builds the
+native Iroh library for this CPU, and imports the project. It needs Python 3.11+
+and Rust (rustup). Nothing is installed outside the checkout.
 
-For Rust edits, close game/editor processes before rebuilding (especially Windows,
-which locks loaded DLLs). Run `python3 tools/build_native.py --host-only` to rebuild
-for development. Full macOS exports need both architectures; the export script
-builds them automatically. `--debug` is available for unoptimized Rust debugging.
+```sh
+python3 tools/godot.py            # run the game
+python3 tools/godot.py --editor   # open the editor
+python3 tools/godot.py -- --solo  # jump straight into a solo launch
+python3 tools/check.py            # all tests
+python3 tools/check.py --rules-only   # unit tests only, no Iroh processes
+```
 
-All Cargo builds use the committed lockfile. Editor/export binaries are verified
-against the SHA-512 hashes committed in `tools/versions.json`. `.tools`, Rust's
-`target`, exported games, and signing keys are ignored by Git. Do not commit them.
+Without the native library the game still runs; only party mode is disabled.
+After changing Rust code, close the game and editor and run
+`python3 tools/build_native.py --host-only`.
+
+Screenshots of every screen, for eyeballing layout at a given size:
+
+```sh
+python3 tools/godot.py --resolution 1170x540 --script res://tests/render.gd
+```
+
+They land in `build/shots/`. This opens a real window and is not part of CI.
+
+## Assets and Git LFS
+
+Images, audio, fonts and native binaries are tracked by Git LFS (see
+`.gitattributes`). Install LFS before cloning (`git lfs install`), or run
+`git lfs pull` afterwards. A clone without LFS has pointer files where the art
+should be and Godot will fail to import them.
 
 ## Desktop exports
 
-Run on the target operating system:
+Run on the operating system you are building for:
 
 ```sh
 python3 tools/export.py linux
 python3 tools/export.py windows
 python3 tools/export.py macos
-python3 tools/export.py server    # Linux host
 ```
 
-`--skip-build` uses native libraries already built in this checkout. It does not
-check whether those libraries match changed source; use it only immediately after
-building them. macOS export rejects a one-architecture library.
-
-The script downloads matching templates, imports the project, exports, starts the
-exported executable to verify native hosting, and packages output/checksums in
-`build/artifacts`. macOS additionally verifies its plist and every code-signing
-architecture. The ad hoc signature is for development; external distribution
-requires your Developer ID certificate and notarization. Windows executables are
-unsigned. Do not describe either as a store-ready signed release.
+The script downloads matching export templates, builds the native library
+(both architectures on macOS), exports, launches the exported game headless to
+prove the native library loads, and writes a zip plus SHA-256 into
+`build/artifacts/`. macOS builds are ad hoc signed and not notarized; Windows
+builds are unsigned.
 
 ## Android
 
-Install JDK 17 and the Android command-line tools/Android Studio SDK. Set:
+Install JDK 17 and the Android SDK, then:
 
 ```sh
 export JAVA_HOME=/path/to/jdk-17
 export ANDROID_HOME=/path/to/Android/sdk
 sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;35.0.1' 'ndk;28.1.13356709'
 python3 tools/export.py android
+adb install -r build/artifacts/cannonauts-android.apk
 ```
 
-On this Mac, typical existing paths are `/opt/homebrew/opt/openjdk@17` and
-`$HOME/Library/Android/sdk`. On Windows, use environment settings or PowerShell
-`$env:JAVA_HOME` / `$env:ANDROID_HOME`; the Python tools also support Windows paths.
+The build cross-compiles the Iroh library for ARM64, packages the small
+`IrohAndroid` Java bridge (it gives Iroh an application context so DNS works),
+and produces a debug-signed APK for Android 10+. The game is locked to
+landscape and runs in immersive mode.
 
-The build compiles both a host extension (needed by the editor during export) and
-Android ARM64 extension. It extracts Godot's matching Gradle template, builds the
-small `IrohAndroid` Java plugin, and installs an application context through JNI
-before Iroh starts. Removing this plugin can leave a compiling app with broken DNS.
-The APK verifier checks the native library, Java bridge bytecode, and signature.
+### Signing key
 
-Install on a connected device with:
+By default the APK is signed with a debug key generated into `.tools/`. In CI
+that key lives in a cache, which GitHub can evict; when it changes, Android
+refuses to install the new build over the old one and you have to uninstall
+first.
+
+To give CI one stable key, create it once and store it as a repository secret:
 
 ```sh
-adb install -r build/artifacts/godot-iroh-starter-android.apk
+keytool -genkeypair -keystore cannonauts.keystore -storepass android -keypass android \
+  -alias androiddebugkey -dname "CN=Cannonauts Development" -keyalg RSA -keysize 2048 -validity 10000
+base64 < cannonauts.keystore | gh secret set ANDROID_KEYSTORE_BASE64
 ```
 
-The app uses a project-local debug keystore under `.tools/.../editor_data/`.
-CI caches that directory as a convenience, but caches are evictable: it is **not a
-stable release identity**. If a fresh CI key differs, uninstall the previous demo
-before installing. For store distribution, configure a separate release keystore,
-use Godot's release export/signing settings and AAB export, and keep credentials in
-GitHub secrets or local ignored credential files. Never ship the debug key as your
-production signing identity.
-
-Hosting is foreground-only. Backgrounding a mobile app closes its session and
-attempts to revoke the code; rehost/rejoin on return. If the process is killed,
-the service's expiry still bounds the code lifetime. Test real devices and network
-changes for your game; a built APK does not prove device behavior.
+Keep the keystore file somewhere safe and out of Git (`*.keystore` is ignored).
+This is still a development identity. For a store release, use a proper release
+keystore, Godot's release signing settings and an AAB.
 
 ## GitHub Actions
 
-`.github/workflows/build.yml` runs for pushes, pull requests, and manual dispatch:
+`.github/workflows/build.yml` runs on every push to `main`, on pull requests,
+and on manual dispatch:
 
-1. Native builds on Linux, Windows, macOS, plus Android cross-compilation on Linux.
-2. Godot import, protocol checks, and one host plus two client processes on each runner.
-3. Game exports, native-load checks for exported desktops, and Android package checks.
-4. Game ZIP/APK artifacts, SHA-256 files, native libraries, and test logs.
-5. A tag like `v0.1.0` creates a GitHub Release after all four matrix jobs pass.
+1. Stamp the build number: `tools/stamp.py N` writes version `0.1.N` into
+   `project.godot` and `export_presets.cfg` (Android `versionCode` = N), where N
+   is the workflow run number. It only ever goes up.
+2. Build the native library on Linux, Windows and macOS, and cross-compile it
+   for Android.
+3. Run `tools/check.py`: rules tests, protocol tests, and a real match between
+   one host and two client processes over Iroh.
+4. Export and package each platform.
+5. On `main` only, publish a GitHub release tagged `v0.1.N` with the APK and the
+   three desktop zips, marked as latest. Pull requests build but do not release.
 
-The release job alone has `contents: write`. Build/PR jobs need no signing secrets
-or access to private GitHub repositories. The default test exchanges full tickets
-and does not call the owner's code service. Internet access is still needed for
-dependency downloads, and Iroh may contact its configured discovery/relay services.
+A release appears only if all four platform jobs pass. Re-running a workflow
+keeps its number and replaces that release's files.
 
-`relay-smoke.yml` is manual: it disables direct IP transport and requires relay
-connectivity. It is separate so an external relay outage does not masquerade as a
-source regression. Run the code-service test locally with `--codes`, or add it to
-that manual workflow for your deployment; avoid hammering a shared service on PRs.
-
-To release after publishing the repository:
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Increment the Android `version/code`, game version, and bundle metadata in
-`export_presets.cfg` before subsequent installable releases. Tagging does not
-automatically change those values. Downloads → Actions artifacts require a GitHub
-login; Release assets follow your repository visibility.
+`relay-smoke.yml` is a manual workflow that forces relay-only connections, kept
+separate so a public relay outage does not look like a broken commit.
 
 ## Updating tools
 
-Change Godot's version and all four official download hashes in
-`tools/versions.json` together. Match `project.godot`'s feature version and check
-Godot's Android SDK/Gradle requirements. Change Iroh/gdext in Cargo.toml, regenerate
-Cargo.lock, rebuild every platform, and rerun both direct and relay tests. Keep
-the JNI bridge and Android context API in sync with Iroh. Regenerate dependency
-notices with `python3 tools/licenses.py` after dependency updates.
-
-Sources: [Godot Android export](https://docs.godotengine.org/en/4.7/tutorials/export/exporting_for_android.html),
-[godot-rust platform exports](https://godot-rust.github.io/book/toolchain/export-mac-and-ios.html).
+Change Godot's version and all four download hashes in `tools/versions.json`
+together, and match the feature version in `project.godot`. Change Iroh or
+gdext in `native/iroh/Cargo.toml`, regenerate `Cargo.lock`, rebuild every
+platform, and rerun both the direct and relay tests. Regenerate dependency
+notices with `python3 tools/licenses.py`.

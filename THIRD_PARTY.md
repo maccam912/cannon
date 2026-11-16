@@ -1,15 +1,24 @@
-# Third-party code
+# Third-party code and assets
+
+All art, fonts and audio in `assets/` come from [Kenney](https://kenney.nl) asset
+packs (Physics Assets, Jumper Pack, Tank Pack, Background Elements Remastered,
+Splat Pack, Kenney Fonts, Impact/Interface/Digital/Sci-Fi Sounds, Music Loops and
+Music Jingles), released under Creative Commons Zero (CC0 1.0). No attribution is
+required; it is given gladly.
+
+The project started from
+[godot-iroh-template](https://github.com/maccam912/godot-iroh-template) (MIT).
 
 The Rust transport in `native/iroh/src` derives from
 [Tipragot/godot-iroh](https://github.com/Tipragot/godot-iroh), upstream revision
 `153979fc02f86b10802358ae38fb74204fbf179a`, via the user's Pacific Rush/racinggame
 integration. Its MIT license is retained in `licenses/godot-iroh-MIT.txt`.
-Changes here include Iroh 1.4.1, full address tickets, a generic ALPN, bounded
+Changes here include Iroh 1.4.1, full address tickets, a game-specific ALPN, bounded
 client polling, connection deadlines, explicit disconnection checks, corrected
 negative-peer exclusion, a seven-client cap, and a renamed Android JNI bridge.
 
-No racing gameplay, tracks, cars, game art, or private service credentials are
-included. The code service is an external dependency configured by URL.
+No private service credentials are included. The code service is an external
+dependency configured by URL.
 
 Godot is MIT-licensed. `licenses/godot-LICENSE.txt` and
 `licenses/godot-COPYRIGHT.txt` contain the engine's notices for the pinned release.
@@ -20,4 +29,4 @@ Rust package versions and declared license expressions are locked by Cargo.lock.
 collects package notices from the resolved sources, including build-only and
 target-specific crates. It is deliberately a superset of the packages linked into
 any one platform. Review this file after upgrading dependencies and preserve it
-when distributing compiled games. The template's export presets include notices.
+when distributing compiled games. The export presets include these notices.

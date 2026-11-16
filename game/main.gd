@@ -32,6 +32,10 @@ var _aim_ticks_left := 0
 var _countdown_shown := -1
 var _demo_wait := 0
 var _quitting := false
+var _landed_at := 0
+var _final_announced := false
+var _watching := ""
+var _connecting := false
 
 func _ready() -> void:
 	get_tree().auto_accept_quit = false
@@ -132,18 +136,26 @@ func _start_solo() -> void:
 # --- Party -----------------------------------------------------------------------
 
 func _host_party() -> void:
+	if _connecting:
+		return
+	_connecting = true
 	Session.player_name = menu.player_name()
 	menu.set_busy(true)
 	menu.set_status("Starting a party...")
 	await Rooms.host()
+	_connecting = false
 	menu.set_busy(false)
 	if Session.is_host() and mode == Mode.MENU:
 		_show_lobby()
 
 func _join_party(code: String) -> void:
+	if _connecting:
+		return
+	_connecting = true
 	Session.player_name = menu.player_name()
 	menu.set_busy(true)
 	await Rooms.join(code)
+	_connecting = false
 	menu.set_busy(false)
 	# The lobby opens when the host's first phase message arrives.
 
@@ -182,14 +194,16 @@ func _on_phase_changed() -> void:
 
 func _enter_party_round() -> void:
 	mode = Mode.PARTY
+	_final_announced = false
 	_show(hud)
 	Sfx.music("music_flight")
 	_begin_round(Session.round_seed, int(Session.entry(Session.local_id).get("slot", 0)))
 	hud.set_info("ROUND %d OF %d" % [Session.round_number, Session.rounds])
 
 func _on_roster_changed() -> void:
-	if mode == Mode.PARTY and hud.result_visible():
-		_show_party_results(Session.phase == Party.Phase.FINAL)
+	# The final table is a snapshot: players leaving afterwards stay on it.
+	if mode == Mode.PARTY and hud.result_visible() and Session.phase == Party.Phase.RESULTS:
+		_show_party_results(false)
 
 func _show_party_results(final: bool) -> void:
 	if mode != Mode.PARTY:
@@ -220,7 +234,9 @@ func _show_party_results(final: bool) -> void:
 		var winner: Dictionary = ranked[0] if not ranked.is_empty() else {}
 		var mine: bool = not winner.is_empty() and winner.id == Session.local_id
 		hud.show_result("YOU WIN!" if mine else "%s WINS!" % str(winner.get("name", "Nobody")).to_upper(), "", "Total distance over %d round%s" % [Session.rounds, "" if Session.rounds == 1 else "s"], rows, buttons)
-		Sfx.play("fanfare")
+		if not _final_announced:
+			_final_announced = true
+			Sfx.play("fanfare")
 	else:
 		hud.show_result("ROUND %d OF %d" % [Session.round_number, Session.rounds], "", "" if Session.is_host() else "The host starts the next round", rows, buttons, Style.BLUE)
 
@@ -233,6 +249,7 @@ func _begin_round(new_seed: int, new_slot: int) -> void:
 	aim = null
 	input_log = []
 	_pending = 0
+	_watching = ""
 	stage = Stage.IDLE
 	world.muted = false
 	world.setup(course_seed, slot)
@@ -258,6 +275,9 @@ func _on_primary() -> void:
 			_fire()
 	elif stage == Stage.FLYING:
 		_pending |= Flight.IN_THRUST
+	elif stage == Stage.LANDED and mode == Mode.SOLO and Time.get_ticks_msec() - _landed_at > 1200:
+		# Tap anywhere to go again, once the result has had a moment to register.
+		_start_solo()
 
 func _on_secondary() -> void:
 	if stage == Stage.FLYING:
@@ -282,6 +302,7 @@ func _fire() -> void:
 
 func _landed() -> void:
 	stage = Stage.LANDED
+	_landed_at = Time.get_ticks_msec()
 	hud.flying = false
 	var distance := flight.distance_cm()
 	if mode == Mode.SOLO:
@@ -395,6 +416,18 @@ func _update_party_view() -> void:
 			board.append({"name": row.name, "slot": row.slot, "me": me, "distance": distance,
 					"text": "%d m%s" % [int(distance), "" if landed else " >"]})
 	board.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.distance > b.distance)
+	# Once you are down (or sitting a round out), follow whoever is furthest
+	# ahead and still in the air.
+	if stage in [Stage.LANDED, Stage.WATCHING] and Session.phase == Party.Phase.PLAYING and Time.get_ticks_msec() - _landed_at > 1500:
+		var leader: Dictionary = {}
+		for ghost: Dictionary in ghosts:
+			if ghost.state == Session.FLYING and (leader.is_empty() or ghost.x > leader.x):
+				leader = ghost
+		if not leader.is_empty():
+			world.watch(leader.x, leader.y, 20.0)
+			if _watching != leader.name:
+				_watching = leader.name
+				hud.show_banner("" if flight == null else Style.meters(flight.distance_cm()), "Watching %s" % leader.name)
 	world.set_ghosts(ghosts)
 	hud.set_board(board if Session.phase == Party.Phase.PLAYING else [])
 

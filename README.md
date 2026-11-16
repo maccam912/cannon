@@ -1,118 +1,107 @@
-# Godot Iroh Starter
+# Cannonauts
 
-A generic multiplayer game starter: Godot 4.7.2, a Rust Iroh 1.4.1 GDExtension,
-four-character room codes, and GitHub Actions builds for Android and desktop.
-Replace the small arena demo with your game. There are no racing systems or assets.
+A launch-for-distance party game. Pump the cannon, fire, then bounce, boost and
+dive your way down an endless course. Play solo for a personal best, or host a
+party of up to eight where everyone flies the same course at the same time and
+the furthest flight wins.
 
-![Starter demo](docs/preview.png)
+Built for phones first (Android, landscape, one or two thumbs) and for desktop
+second (Windows, Linux, macOS). Made with Godot 4.7 on top of
+[godot-iroh-template](https://github.com/maccam912/godot-iroh-template): peer to
+peer over Iroh, four-character party codes, no accounts and no game server.
 
-## Start developing
+## Get it
 
-Install **Python 3.11+**, [Rust via rustup](https://rustup.rs/), and your OS compiler:
-Xcode Command Line Tools on macOS, Visual Studio Build Tools with Desktop C++ on
-Windows, or `build-essential pkg-config` on Ubuntu. Then, from this folder:
+Every commit on `main` is built and published automatically. Grab the newest
+build from [Releases](https://github.com/maccam912/cannon/releases/latest):
 
-```sh
-python3 tools/setup.py
-python3 tools/godot.py --editor
-```
-
-Use `python` instead of `python3` on Windows if that is your installed command.
-Press F6/F5 to run the demo, or `python3 tools/godot.py` to run it directly.
-Setup downloads the pinned engine into `.tools/`, builds the native extension,
-and imports the project. Rust is only needed when building/changing the native
-library. Without it, the project still opens as an offline playground.
-
-The helper uses a self-contained Godot installation; it does not replace your
-system Godot, templates, or editor settings. First setup compiles Rust dependencies
-and can take several minutes. The engine API bindings target Godot 4.5 for ABI
-compatibility; the actual editor and export templates are **4.7.2**.
-
-## Play with another instance or device
-
-1. Run two copies. Click **Host game** on one.
-2. Give the other player the four-character code. Enter it and click **Join game**.
-3. Move with WASD/arrows, or tap/click the arena. Send a message to the room.
-4. Use **Leave** to disconnect. **New code** replaces an expiring code without
-   ending the game. Codes last ten minutes; existing connections outlive them.
-
-The configured code service is the same owner-managed rendezvous service used by
-the existing games. It is configured in `project.godot`, not hidden in a binary.
-**Copy host ticket** provides a fallback that bypasses that HTTP service. Tickets
-include the public endpoint ID and currently known routes; ask for a fresh one
-after network changes. Internet discovery and relay access may still be needed.
-
-## What's included
-
-- Host-authoritative movement for a host and up to seven clients, room chat,
-  join/leave handling, input validation, and bounded packet queues.
-- Iroh direct connections with relay fallback, reliable messages and ordered
-  unreliable snapshots, timeouts, and Android DNS/JNI initialization.
-- Four-character code creation, resolution, renewal, expiry, and revocation;
-  stale HTTP replies cannot reopen a closed room.
-- A source-only starting point, a pinned toolchain, export presets, real
-  multi-process tests, tagged GitHub releases, and downloadable CI artifacts.
-
-| Target | Output | Notes |
+| Platform | File | Notes |
 | --- | --- | --- |
-| Android ARM64 | Development-signed APK | Android 10+, touch controls, JNI bridge |
-| Windows x86_64 | ZIP with EXE and native DLL | Built/tested on a Windows runner |
-| Linux x86_64 | ZIP with executable and native SO | Built/tested on Ubuntu |
-| macOS ARM64 + Intel | Universal app ZIP | macOS 13+, ad hoc signed locally |
-| Linux dedicated server | Headless executable ZIP | Same authoritative session |
+| Android (ARM64, 10+) | `cannonauts-android.apk` | Sideload; development-signed |
+| Windows x86_64 | `cannonauts-windows.zip` | Unzip and run |
+| Linux x86_64 | `cannonauts-linux.zip` | Unzip and run |
+| macOS 13+ (universal) | `cannonauts-macos.zip` | Right-click the app, then Open (not notarized) |
 
-iOS and Web are outside the supported build matrix. Native Iroh cannot simply
-be exported into a browser. Neither App Store/Play Store publishing nor console
-SDK integration is included.
+Builds are numbered `0.1.N`, where N is the CI run number; the number is shown
+on the title screen.
 
-## Check and build
+## How to play
+
+1. **Pump** three times. Tap when the gauge is full; the gold tip is a perfect
+   pump. Three perfect pumps earn a pressure bonus.
+2. **Fire.** The barrel sweeps; tap to launch at that angle.
+3. **Fly.** You have three thrusts and unlimited dives.
+
+| | Touch | Desktop |
+| --- | --- | --- |
+| Pump / fire | tap anywhere | Space, Enter or click |
+| Thrust (limited) | tap the right half | Space, W, Up or left click |
+| Dive | tap the left half | S, Down or right click |
+| Leave | MENU twice, or Back | Esc |
+
+Thrust kicks you up and forward. Dive brings you down right now without costing
+any bounce, so use it to pick your landing spot.
+
+| On the course | What it does |
+| --- | --- |
+| Spring | Big bounce. Dive onto it for a super bounce. |
+| Red barrel | Blasts you up and forward. |
+| Hoop | Speed boost when you fly through it. |
+| Wingman | Bonks you back up into the air. |
+| Jetpack | One more thrust (up to five). |
+| Coins | A little speed each, in arcs worth following. |
+| Mud | Kills most of your speed. |
+| Cactus | Halves your speed. |
+| Storm cloud | Swats you toward the ground. |
+
+## Party mode
+
+One player taps **Host a party** and shares the four-character code. Everyone
+else taps **Join a party** and types it in. The host picks 1, 3 or 5 rounds and
+starts. Each round:
+
+- everyone gets the same course and launches after the same countdown,
+- you see the others flying as ghosts, with a live leaderboard,
+- the round ends when the last cannonaut stops, and distances add up.
+
+Highest total after the last round wins. Joining mid-round is fine: you watch
+that round and play from the next one. If the host leaves, the party ends.
+
+Clients never report a distance. They send what they did (angle, pressure and
+when they thrust or dived) and the host replays the flight through the same
+deterministic simulation to get the score. How that works, and its limits, is in
+[docs/NETWORKING.md](docs/NETWORKING.md).
+
+## Develop
+
+Needs Python 3.11+, Rust via rustup, and your OS compiler toolchain.
 
 ```sh
-python3 tools/check.py                  # Protocol tests + host/two-client session
-python3 tools/check.py --relay-only     # Also requires public Iroh relays
-python3 tools/check.py --codes --relay-only  # Live code service + revocation
-python3 tools/export.py macos          # Or linux/windows on those operating systems
+python3 tools/setup.py          # pinned Godot into .tools/, native Iroh library, import
+python3 tools/godot.py          # run the game
+python3 tools/godot.py --editor # open the editor
+python3 tools/check.py          # rules + protocol tests, then a real 3-process match
 ```
 
-Android setup and all export commands: [docs/BUILDING.md](docs/BUILDING.md).
-Outputs land in `build/artifacts/` with SHA-256 checksums.
-
-## Make it your game
-
-Start with [docs/CUSTOMIZING.md](docs/CUSTOMIZING.md). The important boundaries are:
-
-| File | Responsibility |
+| Path | What lives there |
 | --- | --- |
-| `demo/` | Disposable arena, controls, and UI |
-| `network/session.gd` | Demo game state and authoritative protocol |
-| `network/rooms.gd` | Room-code lifecycle and asynchronous cancellation |
-| `network/rendezvous.gd` | Short-code HTTP API |
-| `native/iroh/src/` | Transport only; no game rules |
-| `tools/` | Pinned setup, builds, exports, checks |
+| `game/sim/` | The whole game as plain, deterministic code: course, flight, launch ritual, party rules. No nodes, no network. |
+| `game/` | Presentation: world, HUD, menu, lobby, and `main.gd` which runs the flow |
+| `network/` | Iroh session and wire protocol, party codes |
+| `native/iroh/` | Rust transport (from the template; no game rules) |
+| `tests/` | `sim_test`, `party_test`, `protocol`, the multi-process `smoke_peer`, and `render` for screenshots |
+| `tools/` | Setup, build, export, version stamping |
+| `assets/` | Art, fonts and audio, stored with Git LFS |
 
-The example uses explicit packets through `MultiplayerPeer`, **not Godot's
-high-level RPC/MultiplayerSpawner API**. This keeps authority and message validation
-visible. See [docs/NETWORKING.md](docs/NETWORKING.md) before changing the protocol.
+The rule of thumb: if it decides an outcome, it belongs in `game/sim/` and gets
+a test. `tests/party_test.gd` plays entire matches by calling `tick()`.
 
-## Put the template on GitHub
+Exports, Android setup and the release pipeline are covered in
+[docs/BUILDING.md](docs/BUILDING.md); what has actually been tested is in
+[docs/VALIDATION.md](docs/VALIDATION.md).
 
-This folder is local; creating it does not publish a repository or run remote CI.
-Create an empty GitHub repository, initialize/commit this folder, add its remote,
-and push. In repository Settings → General, enable **Template repository** to get
-GitHub's **Use this template** button for future games.
+## Credits and licenses
 
-Every push/PR builds all supported platforms. Tags beginning with `v` publish a
-release only after every build succeeds. The Android key is a development key;
-store signing remains a separate setup. Read [docs/BUILDING.md](docs/BUILDING.md)
-for Actions, release, and signing details, and [docs/VALIDATION.md](docs/VALIDATION.md)
-for what has actually been exercised locally.
-
-## Versions and licenses
-
-As checked on November 3, 2026, [Godot 4.7.2 is the latest stable release;
-4.8 is beta](https://godotengine.org/download/archive/).
-[Iroh 1.4.1](https://docs.rs/iroh/1.4.1/iroh/) is pinned in Cargo.toml/Cargo.lock.
-Version and checksum pins live in `tools/versions.json` and `rust-toolchain.toml`.
-
-Template code is MIT. The transport derives from Tipragot's MIT Godot-Iroh work
-via the user's racinggame integration; see [THIRD_PARTY.md](THIRD_PARTY.md).
+Game code is MIT. Art, fonts and audio are by [Kenney](https://kenney.nl) (CC0).
+The Iroh transport derives from Tipragot's MIT Godot-Iroh work via
+godot-iroh-template. Details in [THIRD_PARTY.md](THIRD_PARTY.md).

@@ -50,8 +50,10 @@ func add_player(id: int, player_name: String) -> bool:
 	var slot := 0
 	while used.has(slot):
 		slot += 1
+	# Arriving during the countdown still makes this round; later than that
+	# you watch it and play from the next one.
 	players[id] = {"name": clean_name(player_name, id), "slot": slot, "total_cm": 0,
-			"round_cm": -1, "best_cm": 0, "playing": false}
+			"round_cm": -1, "best_cm": 0, "playing": phase == Phase.COUNTDOWN}
 	roster_revision += 1
 	return true
 
