@@ -47,10 +47,12 @@ def prepare():
     key = DATA / "debug.keystore"
     # CI can supply one stable key (base64 in ANDROID_KEYSTORE_BASE64, alias
     # androiddebugkey, password android) so each build installs over the last.
+    # Locally, ANDROID_KEYSTORE_FILE can point at the same keystore file.
     supplied = os.environ.get("ANDROID_KEYSTORE_BASE64", "").strip()
-    if supplied:
+    local = os.environ.get("ANDROID_KEYSTORE_FILE", "").strip()
+    if supplied or local:
         key.parent.mkdir(parents=True, exist_ok=True)
-        key.write_bytes(base64.b64decode(supplied))
+        key.write_bytes(base64.b64decode(supplied) if supplied else Path(local).read_bytes())
     if not key.exists():
         subprocess.run([str(java / "bin" / ("keytool" + suffix)), "-genkeypair", "-keystore", str(key),
                         "-storepass", "android", "-keypass", "android", "-alias", "androiddebugkey",

@@ -68,22 +68,34 @@ landscape and runs in immersive mode.
 
 ### Signing key
 
-By default the APK is signed with a debug key generated into `.tools/`. In CI
-that key lives in a cache, which GitHub can evict; when it changes, Android
-refuses to install the new build over the old one and you have to uninstall
-first.
+Android only installs an update over an existing app when both are signed with
+the same key. CI signs every APK with one development key, supplied through the
+`ANDROID_KEYSTORE_BASE64` repository secret (alias `androiddebugkey`, password
+`android`), so each release installs over the previous one. Builds up to
+`v0.1.2` predate that key: uninstall one of those once before updating.
 
-To give CI one stable key, create it once and store it as a repository secret:
+The keystore itself is not in the repository. To sign local exports with the
+same key, so they install over CI builds and the other way round, point the
+export at the file:
 
 ```sh
-keytool -genkeypair -keystore cannonauts.keystore -storepass android -keypass android \
-  -alias androiddebugkey -dname "CN=Cannonauts Development" -keyalg RSA -keysize 2048 -validity 10000
-base64 < cannonauts.keystore | gh secret set ANDROID_KEYSTORE_BASE64
+ANDROID_KEYSTORE_FILE=/path/to/cannonauts-dev.keystore python3 tools/export.py android
 ```
 
-Keep the keystore file somewhere safe and out of Git (`*.keystore` is ignored).
-This is still a development identity. For a store release, use a proper release
-keystore, Godot's release signing settings and an AAB.
+Without either variable the export generates a throwaway debug key in `.tools/`.
+
+If the secret is ever lost, create a new key and set it again; everyone then
+has to uninstall once:
+
+```sh
+keytool -genkeypair -keystore cannonauts-dev.keystore -storepass android -keypass android \
+  -alias androiddebugkey -dname "CN=Cannonauts Development" -keyalg RSA -keysize 2048 -validity 10000
+base64 < cannonauts-dev.keystore | gh secret set ANDROID_KEYSTORE_BASE64
+```
+
+This is a development identity, guarded only by who can read the secret. For a
+store release, use a proper release keystore with a real password, Godot's
+release signing settings and an AAB.
 
 ## GitHub Actions
 
