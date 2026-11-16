@@ -1,64 +1,84 @@
-extends SceneTree
+extends "res://tests/harness.gd"
+## One real Iroh process per peer: a host and two clients play a one-round
+## party match and must agree on every score.
+
+const Party := preload("res://game/sim/party.gd")
+const Flight := preload("res://game/sim/flight.gd")
 
 var session: Node
-var chat_seen := false
+var role_name := "peer"
 
-func _initialize() -> void:
-	call_deferred("_run")
+func label() -> String:
+	return role_name.to_upper()
 
-func _run() -> void:
+func run() -> void:
 	session = root.get_node("Session")
-	session.chat_received.connect(func(message: String) -> void:
-		if "smoke hello" in message:
-			chat_seen = true)
+	var rooms: Node = root.get_node("Rooms")
 	var args := OS.get_cmdline_user_args()
+	role_name = args[0]
 	var path := args[1]
 	var use_codes := "--codes" in args
-	var rooms := root.get_node("Rooms")
-	if args[0] == "host":
+	session.player_name = role_name.capitalize()
+	if role_name == "host":
 		if use_codes:
-			assert(await rooms.host(), "TEST FAIL: could not create join code")
+			check(await rooms.host(), "host creates a join code")
 		else:
-			assert(session.host())
-		await create_timer(2).timeout
+			check(session.host(), "host starts")
+		await create_timer(2.0).timeout
 		var file := FileAccess.open(path, FileAccess.WRITE)
 		file.store_string(rooms.code if use_codes else session.ticket())
 		file.close()
-		var joined := false
-		for index in range(600):
-			await create_timer(0.1).timeout
-			if session.players.size() >= 3:
-				joined = true
-			if joined and session.players.size() == 1 and chat_seen:
-				var old_code: String = rooms.code
-				session.leave()
-				await create_timer(1.0).timeout
-				if use_codes:
-					var reply: Dictionary = await rooms.service.resolve(old_code)
-					assert(not reply.ok and "expired or not found" in str(reply.get("message", "")), "TEST FAIL: code not revoked")
-				print("HOST_PASS")
-				quit()
-				return
-		push_error("TEST FAIL: host did not see two peers, chat, and disconnect cleanup")
-		quit(1)
-	else:
+		check(await _wait(func() -> bool: return session.roster.size() >= 3, 60.0), "two clients joined")
+		session.set_rounds(1)
+		session.start_match()
+		var mine := await _play(300, 800, "t40")
+		check(await _wait(func() -> bool: return session.phase == Party.Phase.RESULTS, 60.0), "round resolved")
+		check(session.entry(1).round_cm == mine, "host scored itself by replay")
+		for row: Dictionary in session.roster:
+			check(row.round_cm > 0, "%s has a verified distance" % row.name)
+		session.advance()
+		check(await _wait(func() -> bool: return session.phase == Party.Phase.FINAL, 5.0), "match reached the final")
+		# Let clients read the final standings, then make sure they leave cleanly.
+		check(await _wait(func() -> bool: return session.roster.size() == 1, 30.0), "clients left")
+		var old_code: String = rooms.code
+		session.leave()
+		await create_timer(1.0).timeout
 		if use_codes:
-			assert(await rooms.join(FileAccess.get_file_as_string(path)))
-		else:
-			assert(session.join(FileAccess.get_file_as_string(path)))
-		for index in range(400):
-			await create_timer(0.1).timeout
-			if session.players.size() >= 3 and session.players.has(session.local_id):
-				break
-		assert(session.players.size() >= 3, "TEST FAIL: two clients must join")
-		var start: Vector2 = session.players[session.local_id]
-		session.direction = Vector2(1, 0)
-		session.send_chat("smoke hello")
-		await create_timer(1.2).timeout
-		assert(session.snapshots_received > 10, "TEST FAIL: missing snapshots")
-		assert(session.players[session.local_id].x > start.x + 80, "TEST FAIL: movement not replicated")
-		assert(chat_seen, "TEST FAIL: reliable room chat not received")
+			var reply: Dictionary = await rooms.service.resolve(old_code)
+			check(not reply.ok, "code revoked after leaving")
+	else:
+		var joined: bool = (await rooms.join(FileAccess.get_file_as_string(path))) if use_codes else session.join(FileAccess.get_file_as_string(path))
+		check(joined, "client starts joining")
+		check(await _wait(func() -> bool: return session.connected() and session.roster.size() >= 3, 60.0), "client sees the full party")
+		check(not session.entry(session.local_id).is_empty(), "client is on the roster")
+		var mine := await _play(450 + session.local_id % 7 * 10, 600, "t30d50")
+		check(await _wait(func() -> bool: return session.phase == Party.Phase.FINAL, 60.0), "client saw the final")
+		check(session.entry(session.local_id).round_cm == mine,
+				"host's replay matches this client's flight: %d vs %d" % [session.entry(session.local_id).round_cm, mine])
+		check(session.entry(1).round_cm > 0 and session.entry(1).name == "Host", "client sees the host's score")
+		check(session.snapshots_received > 3, "ghost positions arrived")
+		check(session.ghosts.has(1), "client sees the host's ghost")
+		check(session.standings().size() == 3, "three players in the standings")
 		session.leave()
 		await create_timer(0.5).timeout
-		print("CLIENT_PASS")
-		quit()
+
+## Waits for the round, flies it instantly with a fixed plan, reports it.
+func _play(angle: int, power: int, plan: String) -> int:
+	if not await _wait(func() -> bool: return session.phase == Party.Phase.PLAYING, 60.0):
+		check(false, "round never started")
+		return -1
+	var flight: Flight = Flight.replay(session.round_seed, angle, power, Flight.decode_inputs(plan))
+	for step in 8:
+		session.report(flight.x * (step + 1) / 8.0, 3.0, session.FLYING)
+		await create_timer(0.15).timeout
+	session.report(flight.x, 0.0, session.LANDED)
+	session.submit(angle, power, plan)
+	return flight.distance_cm()
+
+func _wait(condition: Callable, seconds: float) -> bool:
+	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
+	while Time.get_ticks_msec() < deadline:
+		if condition.call():
+			return true
+		await create_timer(0.1).timeout
+	return condition.call()

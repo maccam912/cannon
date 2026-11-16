@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import, validate the demo protocol, and run real host/two-client Iroh sessions."""
+"""Import, run the rules and protocol tests, then a real host/two-client Iroh match."""
 import argparse
 from contextlib import ExitStack
 import subprocess
@@ -57,9 +57,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--relay-only", action="store_true", help="require public Iroh relay connectivity")
     parser.add_argument("--codes", action="store_true", help="exercise the configured live short-code service, including revocation")
+    parser.add_argument("--rules-only", action="store_true", help="unit tests only; skip the multi-process Iroh session")
     args = parser.parse_args()
     run(["--headless", "--editor", "--import"], timeout=180)
-    output = run(["--headless", "--script", "res://tests/protocol.gd"], timeout=30)
-    if "PROTOCOL_PASS" not in output:
-        raise RuntimeError("Protocol assertions did not finish")
+    for script, marker, limit in (("sim_test", "SIM_PASS", 180), ("party_test", "PARTY_PASS", 180), ("protocol", "PROTOCOL_PASS", 30)):
+        output = run(["--headless", "--script", "res://tests/" + script + ".gd"], timeout=limit)
+        if marker not in output:
+            raise RuntimeError(script + " did not finish")
+    if args.rules_only:
+        raise SystemExit(0)
     smoke(args.relay_only, args.codes)
